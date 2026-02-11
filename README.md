@@ -10,50 +10,29 @@ uv sync
 
 ## Run
 
-List demos:
+Run directly as a module:
 
 ```bash
-uv run demo --list
+uv run python -m lptd.demos.snake_manual
 ```
 
-Run by name:
+Voxel-ish world (canonical, supports both renderers):
 
 ```bash
-uv run demo snake_manual
-```
-
-You can pass args to the underlying script (use `--`):
-
-```bash
-uv run demo snake_manual -- --help
+uv run python -m lptd.demos.vox
+uv run python -m lptd.demos.vox --renderer gl
+uv run python -m lptd.demos.vox --renderer gl --render-scale 2
+uv run python -m lptd.demos.vox --render-scale 1
 ```
 
 Snake (manual):
 
 ```bash
-uv run python demos/snake_manual.py
+uv run python -m lptd.demos.snake_manual
 ```
 
 Snake (auto/BFS, very fast):
 
 ```bash
-uv run python demos/snake_auto.py
-```
-
-Voxel-ish world (software render):
-
-```bash
-uv run python demos/vox_soft.py
-```
-
-Voxel-ish world (software render, v3):
-
-```bash
-uv run python demos/vox_soft_v3.py
-```
-
-Voxel-ish world (OpenGL):
-
-```bash
-uv run python demos/vox_gl.py
+uv run python -m lptd.demos.snake_auto
 ```
