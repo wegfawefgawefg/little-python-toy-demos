@@ -10,3 +10,13 @@ dependencies = [
     "pygame>=2.6.1",
     "pyopengl>=3.1.9",
 ]
+
+[project.scripts]
+demo = "lptd.demo:main"
+
+[build-system]
+requires = ["hatchling>=1.24.2"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/lptd"]

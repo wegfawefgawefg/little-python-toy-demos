@@ -10,6 +10,24 @@ uv sync
 
 ## Run
 
+List demos:
+
+```bash
+uv run demo --list
+```
+
+Run by name:
+
+```bash
+uv run demo snake_manual
+```
+
+You can pass args to the underlying script (use `--`):
+
+```bash
+uv run demo snake_manual -- --help
+```
+
 Snake (manual):
 
 ```bash
