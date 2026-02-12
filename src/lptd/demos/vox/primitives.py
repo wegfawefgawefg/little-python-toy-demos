@@ -8,9 +8,11 @@ import pygame
 from OpenGL.GL import (
     GL_ALPHA_TEST,
     GL_BLEND,
+    GL_COLOR_ARRAY,
     GL_COLOR_BUFFER_BIT,
     GL_DEPTH_BUFFER_BIT,
     GL_DEPTH_TEST,
+    GL_FLOAT,
     GL_GREATER,
     GL_LINES,
     GL_NEAREST,
@@ -19,26 +21,34 @@ from OpenGL.GL import (
     GL_RGBA,
     GL_SRC_ALPHA,
     GL_TEXTURE_2D,
+    GL_TEXTURE_COORD_ARRAY,
     GL_TEXTURE_MAG_FILTER,
     GL_TEXTURE_MIN_FILTER,
     GL_TRIANGLES,
     GL_TRIANGLE_FAN,
     GL_UNSIGNED_BYTE,
+    GL_VERTEX_ARRAY,
     glBegin,
     glAlphaFunc,
     glBindTexture,
     glBlendFunc,
     glClear,
     glClearColor,
+    glColorPointer,
     glColor3ub,
+    glDrawArrays,
     glEnable,
+    glEnableClientState,
     glEnd,
     glDisable,
+    glDisableClientState,
     glGenTextures,
     glLineWidth,
+    glTexCoordPointer,
     glTexCoord2f,
     glTexImage2D,
     glTexParameteri,
+    glVertexPointer,
     glVertex3f,
 )
 
@@ -331,8 +341,13 @@ class SoftZPrimitives:
 class GLPrimitives:
     def __init__(self) -> None:
         self._quad_batch_active = False
+        self._quad_vertices: list[tuple[float, float, float]] = []
+        self._quad_colors: list[tuple[int, int, int]] = []
         self._sprite_textures: dict[str, int] = {}
         self._sprite_batch_kind: str | None = None
+        self._sprite_vertices: list[tuple[float, float, float]] = []
+        self._sprite_uvs: list[tuple[float, float]] = []
+        self._sprite_colors: list[tuple[int, int, int]] = []
 
     def clear(self, color: tuple[int, int, int]) -> None:
         r, g, b = [c / 255.0 for c in color]
@@ -344,12 +359,22 @@ class GLPrimitives:
         if self._quad_batch_active:
             return
         self._quad_batch_active = True
-        glBegin(GL_QUADS)
+        self._quad_vertices.clear()
+        self._quad_colors.clear()
 
     def end_quads(self) -> None:
         if not self._quad_batch_active:
             return
-        glEnd()
+        if self._quad_vertices:
+            verts = np.asarray(self._quad_vertices, dtype=np.float32)
+            cols = np.asarray(self._quad_colors, dtype=np.uint8)
+            glEnableClientState(GL_VERTEX_ARRAY)
+            glEnableClientState(GL_COLOR_ARRAY)
+            glVertexPointer(3, GL_FLOAT, 0, verts)
+            glColorPointer(3, GL_UNSIGNED_BYTE, 0, cols)
+            glDrawArrays(GL_QUADS, 0, len(self._quad_vertices))
+            glDisableClientState(GL_COLOR_ARRAY)
+            glDisableClientState(GL_VERTEX_ARRAY)
         self._quad_batch_active = False
 
     def _ensure_sprite_texture(self, kind: str) -> int:
@@ -380,27 +405,43 @@ class GLPrimitives:
         return tex
 
     def begin_sprites(self, kind: str) -> None:
-        tex = self._ensure_sprite_texture(kind)
+        _ = self._ensure_sprite_texture(kind)
         if self._quad_batch_active:
             self.end_quads()
         if self._sprite_batch_kind == kind:
             return
         if self._sprite_batch_kind is not None:
             self.end_sprites()
-        glEnable(GL_BLEND)
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
-        # Avoid depth writes from fully transparent texels.
-        glEnable(GL_ALPHA_TEST)
-        glAlphaFunc(GL_GREATER, 0.01)
-        glEnable(GL_TEXTURE_2D)
-        glBindTexture(GL_TEXTURE_2D, tex)
-        glBegin(GL_QUADS)
         self._sprite_batch_kind = kind
+        self._sprite_vertices.clear()
+        self._sprite_uvs.clear()
+        self._sprite_colors.clear()
 
     def end_sprites(self) -> None:
         if self._sprite_batch_kind is None:
             return
-        glEnd()
+        tex = self._ensure_sprite_texture(self._sprite_batch_kind)
+        if self._sprite_vertices:
+            verts = np.asarray(self._sprite_vertices, dtype=np.float32)
+            uvs = np.asarray(self._sprite_uvs, dtype=np.float32)
+            cols = np.asarray(self._sprite_colors, dtype=np.uint8)
+            glEnable(GL_BLEND)
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+            # Avoid depth writes from fully transparent texels.
+            glEnable(GL_ALPHA_TEST)
+            glAlphaFunc(GL_GREATER, 0.01)
+            glEnable(GL_TEXTURE_2D)
+            glBindTexture(GL_TEXTURE_2D, tex)
+            glEnableClientState(GL_VERTEX_ARRAY)
+            glEnableClientState(GL_TEXTURE_COORD_ARRAY)
+            glEnableClientState(GL_COLOR_ARRAY)
+            glVertexPointer(3, GL_FLOAT, 0, verts)
+            glTexCoordPointer(2, GL_FLOAT, 0, uvs)
+            glColorPointer(3, GL_UNSIGNED_BYTE, 0, cols)
+            glDrawArrays(GL_QUADS, 0, len(self._sprite_vertices))
+            glDisableClientState(GL_COLOR_ARRAY)
+            glDisableClientState(GL_TEXTURE_COORD_ARRAY)
+            glDisableClientState(GL_VERTEX_ARRAY)
         glBindTexture(GL_TEXTURE_2D, 0)
         glDisable(GL_TEXTURE_2D)
         glDisable(GL_ALPHA_TEST)
@@ -420,15 +461,16 @@ class GLPrimitives:
             self.begin_sprites(kind)
         half = size / 2
         z = 0.0 if depth is None else -depth
-        glColor3ub(*color)
-        glTexCoord2f(0.0, 1.0)
-        glVertex3f(x - half, y - half, z)
-        glTexCoord2f(1.0, 1.0)
-        glVertex3f(x + half, y - half, z)
-        glTexCoord2f(1.0, 0.0)
-        glVertex3f(x + half, y + half, z)
-        glTexCoord2f(0.0, 0.0)
-        glVertex3f(x - half, y + half, z)
+        self._sprite_vertices.extend(
+            (
+                (x - half, y - half, z),
+                (x + half, y - half, z),
+                (x + half, y + half, z),
+                (x - half, y + half, z),
+            )
+        )
+        self._sprite_uvs.extend(((0.0, 1.0), (1.0, 1.0), (1.0, 0.0), (0.0, 0.0)))
+        self._sprite_colors.extend((color, color, color, color))
 
     def rect_center(
         self,
@@ -444,10 +486,15 @@ class GLPrimitives:
         # Negate so larger logical depth (farther) ends up farther in depth buffer.
         z = 0.0 if depth is None else -depth
         if self._quad_batch_active:
-            glVertex3f(x - half, y - half, z)
-            glVertex3f(x + half, y - half, z)
-            glVertex3f(x + half, y + half, z)
-            glVertex3f(x - half, y + half, z)
+            self._quad_vertices.extend(
+                (
+                    (x - half, y - half, z),
+                    (x + half, y - half, z),
+                    (x + half, y + half, z),
+                    (x - half, y + half, z),
+                )
+            )
+            self._quad_colors.extend((color, color, color, color))
         else:
             glBegin(GL_QUADS)
             glVertex3f(x - half, y - half, z)

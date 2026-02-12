@@ -21,7 +21,7 @@ Reduce per-frame Python object churn for billboard entities.
 
 Expected impact: medium.
 
-## 3) GPU Batching Upgrade (Beyond Immediate Mode)
+## 3) GPU Batching Upgrade (Implemented: Client-Array Batching)
 
 Replace `glBegin/glEnd` style drawing with vertex arrays/VBOs.
 
