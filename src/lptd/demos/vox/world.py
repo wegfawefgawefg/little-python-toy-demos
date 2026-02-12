@@ -8,16 +8,56 @@ import numpy as np
 
 from . import config, state
 
+_FACE_NEIGHBORS = (
+    (1, 0, 0),
+    (-1, 0, 0),
+    (0, 1, 0),
+    (0, -1, 0),
+    (0, 0, 1),
+    (0, 0, -1),
+)
+
+
+def _is_solid_world(wx: int, wy: int, wz: int) -> bool:
+    if wy < 0:
+        return True
+    if wy >= config.CHUNK_HEIGHT:
+        return False
+    return (wx, wy, wz) in state.solid_blocks
+
+
+def _is_surface_voxel(wx: int, wy: int, wz: int) -> bool:
+    for dx, dy, dz in _FACE_NEIGHBORS:
+        if not _is_solid_world(wx + dx, wy + dy, wz + dz):
+            return True
+    return False
+
+
+def invalidate_chunk_draw_cache(key: tuple[int, int], include_neighbors: bool = False) -> None:
+    state.chunk_draw_blocks.pop(key, None)
+    if not include_neighbors:
+        return
+    cx, cz = key
+    for nk in ((cx - 1, cz), (cx + 1, cz), (cx, cz - 1), (cx, cz + 1)):
+        state.chunk_draw_blocks.pop(nk, None)
+
 
 def rebuild_chunk_draw_blocks(key: tuple[int, int]) -> None:
     chunk = state.chunks[key]
     non_air = np.argwhere(chunk != config.BLOCK_AIR)
     blocks: list[tuple[int, int, int, int]] = []
+    cx, cz = key
+    x0 = cx * config.CHUNK_SIZE
+    z0 = cz * config.CHUNK_SIZE
     for lx, ly, lz in non_air:
         i_lx = int(lx)
         i_ly = int(ly)
         i_lz = int(lz)
-        blocks.append((i_lx, i_ly, i_lz, int(chunk[i_lx, i_ly, i_lz])))
+        wx = x0 + i_lx
+        wy = i_ly
+        wz = z0 + i_lz
+        if _is_surface_voxel(wx, wy, wz):
+            blocks.append((i_lx, i_ly, i_lz, int(chunk[i_lx, i_ly, i_lz])))
     state.chunk_draw_blocks[key] = blocks
 
 
@@ -146,6 +186,9 @@ def generate_chunk(cx: int, cz: int) -> None:
         generate_tree_at(wx, wz, h)
 
     rebuild_chunk_draw_blocks(key)
+    cx, cz = key
+    for nk in ((cx - 1, cz), (cx + 1, cz), (cx, cz - 1), (cx, cz + 1)):
+        invalidate_chunk_draw_cache(nk, include_neighbors=False)
 
 
 def add_voxel(pos: tuple[int, int, int], color: tuple[int, int, int]) -> None:
@@ -167,8 +210,7 @@ def add_voxel(pos: tuple[int, int, int], color: tuple[int, int, int]) -> None:
             return
         chunk[lx, y, lz] = bid
         state.solid_blocks.add(pos)
-        if prev == config.BLOCK_AIR and key in state.chunk_draw_blocks:
-            state.chunk_draw_blocks[key].append((lx, y, lz, int(bid)))
+        invalidate_chunk_draw_cache(key, include_neighbors=True)
 
 
 def draw_line(start, end, color):
