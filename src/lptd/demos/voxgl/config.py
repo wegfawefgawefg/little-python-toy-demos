@@ -7,8 +7,9 @@ WIDTH, HEIGHT = RENDER_W * WINDOW_SCALE, RENDER_H * WINDOW_SCALE
 # Horizontal field-of-view in degrees.
 FOV = 75.0
 
+# 16^3 chunks allow compact 12-bit local voxel indices.
 CHUNK_SIZE = 16
-CHUNK_HEIGHT = 32
+CHUNK_HEIGHT = 16
 WATER_LEVEL = 4
 NOISE_SCALE = 0.1
 NOISE_OCTAVES = 4

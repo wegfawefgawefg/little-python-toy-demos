@@ -94,7 +94,12 @@ def gather_draw_list(pcx: int, pcz: int, sort_items: bool = True):
 
                 x0 = cx * config.CHUNK_SIZE
                 z0 = cz * config.CHUNK_SIZE
-                for lx, ly, lz, bid in blocks:
+                for rec in blocks:
+                    idx = int(rec["idx"])
+                    bid = int(rec["bid"])
+                    lx = idx & 0xF
+                    lz = (idx >> 4) & 0xF
+                    ly = (idx >> 8) & 0xF
                     world = Vec3(x0 + lx + 0.5, ly + 0.5, z0 + lz + 0.5)
                     cam = world_to_camera_vec3(world, view_rot, cam_view)
 

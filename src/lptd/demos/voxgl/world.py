@@ -17,6 +17,7 @@ _FACE_NEIGHBORS = (
     (0, 0, -1),
 )
 
+_PACKED_BLOCK_DTYPE = np.dtype([("idx", np.uint16), ("bid", np.uint8)])
 
 def _is_solid_world(wx: int, wy: int, wz: int) -> bool:
     if wy < 0:
@@ -60,7 +61,7 @@ def rebuild_chunk_sprite_bases(key: tuple[int, int]) -> None:
 def rebuild_chunk_draw_blocks(key: tuple[int, int]) -> None:
     chunk = state.chunks[key]
     non_air = np.argwhere(chunk != config.BLOCK_AIR)
-    blocks: list[tuple[int, int, int, int]] = []
+    packed: list[tuple[int, int]] = []
     cx, cz = key
     x0 = cx * config.CHUNK_SIZE
     z0 = cz * config.CHUNK_SIZE
@@ -72,8 +73,12 @@ def rebuild_chunk_draw_blocks(key: tuple[int, int]) -> None:
         wy = i_ly
         wz = z0 + i_lz
         if _is_surface_voxel(wx, wy, wz):
-            blocks.append((i_lx, i_ly, i_lz, int(chunk[i_lx, i_ly, i_lz])))
-    state.chunk_draw_blocks[key] = blocks
+            idx = i_lx | (i_lz << 4) | (i_ly << 8)
+            packed.append((idx, int(chunk[i_lx, i_ly, i_lz])))
+    if packed:
+        state.chunk_draw_blocks[key] = np.array(packed, dtype=_PACKED_BLOCK_DTYPE)
+    else:
+        state.chunk_draw_blocks[key] = np.zeros((0,), dtype=_PACKED_BLOCK_DTYPE)
 
 
 def generate_flower_patch(base_x: int, base_z: int, ground_h: int) -> dict:
