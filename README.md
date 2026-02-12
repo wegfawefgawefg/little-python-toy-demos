@@ -16,13 +16,18 @@ Run directly as a module:
 uv run python -m lptd.demos.snake_manual
 ```
 
-Voxel-ish world (canonical, supports both renderers):
+Voxel-ish world (hardware path, active development):
+
+```bash
+uv run python -m lptd.demos.voxgl
+uv run python -m lptd.demos.voxgl --render-scale 2
+uv run python -m lptd.demos.voxgl --render-scale 1
+```
+
+Voxel-ish world (legacy/soft-hybrid path):
 
 ```bash
 uv run python -m lptd.demos.vox
-uv run python -m lptd.demos.vox --renderer gl
-uv run python -m lptd.demos.vox --renderer gl --render-scale 2
-uv run python -m lptd.demos.vox --render-scale 1
 ```
 
 Snake (manual):
