@@ -162,7 +162,29 @@ def gather_draw_list(pcx: int, pcz: int, sort_items: bool = True):
                             (depth, "grass", proj, factor, entity["blades"], entity["color_offset"])
                         )
                     elif et == "flower_patch":
-                        combined.append((depth, "flower_patch", proj, factor, entity))
+                        flowers_projected = []
+                        for flower in entity["flowers"]:
+                            ox, oz = flower["offset"]
+                            flower_world = Vec3(pos[0] + ox, pos[1], pos[2] + oz)
+                            fcam = world_to_camera_vec3(flower_world, view_rot, cam_view)
+                            if fcam.z <= 0.1 or fcam.z > max_dist:
+                                continue
+                            fproj, ffactor = project_point_vec3(fcam)
+                            if fproj is None:
+                                continue
+                            flowers_projected.append(
+                                {
+                                    "sx": fproj.x,
+                                    "sy": fproj.y,
+                                    "depth": fcam.z,
+                                    "factor": ffactor,
+                                    "color": flower["color"],
+                                }
+                            )
+                        if flowers_projected:
+                            combined.append(
+                                (depth, "flower_patch", proj, factor, entity, flowers_projected)
+                            )
                     elif et == "bunny":
                         combined.append((depth, "bunny", proj, factor, entity))
 

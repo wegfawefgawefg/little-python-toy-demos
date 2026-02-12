@@ -7,6 +7,9 @@ from . import config, state
 
 
 def update_entities(dt: float) -> None:
+    if not config.BUNNY_MOVEMENT_ENABLED:
+        return
+
     for ents in state.chunk_entities.values():
         for entity in ents:
             if entity["type"] != "bunny":
@@ -26,4 +29,3 @@ def update_entities(dt: float) -> None:
             entity["vel"] = (vx, 0.0, vz)
             entity["pos"][0] += vx * dt * 2
             entity["pos"][2] += vz * dt * 2
-

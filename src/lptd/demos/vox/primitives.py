@@ -1,26 +1,48 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 import numpy as np
 import pygame
 from OpenGL.GL import (
+    GL_ALPHA_TEST,
+    GL_BLEND,
     GL_COLOR_BUFFER_BIT,
     GL_DEPTH_BUFFER_BIT,
     GL_DEPTH_TEST,
+    GL_GREATER,
     GL_LINES,
+    GL_NEAREST,
+    GL_ONE_MINUS_SRC_ALPHA,
     GL_QUADS,
+    GL_RGBA,
+    GL_SRC_ALPHA,
+    GL_TEXTURE_2D,
+    GL_TEXTURE_MAG_FILTER,
+    GL_TEXTURE_MIN_FILTER,
     GL_TRIANGLES,
     GL_TRIANGLE_FAN,
+    GL_UNSIGNED_BYTE,
     glBegin,
+    glAlphaFunc,
+    glBindTexture,
+    glBlendFunc,
     glClear,
     glClearColor,
     glColor3ub,
     glEnable,
     glEnd,
+    glDisable,
+    glGenTextures,
     glLineWidth,
+    glTexCoord2f,
+    glTexImage2D,
+    glTexParameteri,
     glVertex3f,
 )
+
+_ASSET_DIR = Path(__file__).with_name("assets")
 
 
 class SoftPrimitives:
@@ -198,11 +220,119 @@ class SoftZPrimitives:
 
 
 class GLPrimitives:
+    def __init__(self) -> None:
+        self._quad_batch_active = False
+        self._sprite_textures: dict[str, int] = {}
+        self._sprite_batch_kind: str | None = None
+
     def clear(self, color: tuple[int, int, int]) -> None:
         r, g, b = [c / 255.0 for c in color]
         glClearColor(r, g, b, 1.0)
         glEnable(GL_DEPTH_TEST)
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+
+    def begin_quads(self) -> None:
+        if self._quad_batch_active:
+            return
+        self._quad_batch_active = True
+        glBegin(GL_QUADS)
+
+    def end_quads(self) -> None:
+        if not self._quad_batch_active:
+            return
+        glEnd()
+        self._quad_batch_active = False
+
+    def _ensure_sprite_texture(self, kind: str) -> int:
+        tex = self._sprite_textures.get(kind)
+        if tex is not None:
+            return tex
+
+        if kind == "grass":
+            path = _ASSET_DIR / "grass_sprite.png"
+        elif kind == "bunny":
+            path = _ASSET_DIR / "bunny_sprite.png"
+        elif kind == "flower_yellow":
+            path = _ASSET_DIR / "flower_yellow.png"
+        elif kind == "flower_red":
+            path = _ASSET_DIR / "flower_red.png"
+        elif kind == "flower_pink":
+            path = _ASSET_DIR / "flower_pink.png"
+        else:
+            raise ValueError(f"unknown sprite kind: {kind}")
+
+        surf = pygame.image.load(str(path)).convert_alpha()
+        w, h = surf.get_size()
+        pixels = pygame.image.tobytes(surf, "RGBA", True)
+        tex = glGenTextures(1)
+        glBindTexture(GL_TEXTURE_2D, tex)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+        glTexImage2D(
+            GL_TEXTURE_2D,
+            0,
+            GL_RGBA,
+            w,
+            h,
+            0,
+            GL_RGBA,
+            GL_UNSIGNED_BYTE,
+            pixels,
+        )
+        glBindTexture(GL_TEXTURE_2D, 0)
+        self._sprite_textures[kind] = tex
+        return tex
+
+    def begin_sprites(self, kind: str) -> None:
+        tex = self._ensure_sprite_texture(kind)
+        if self._quad_batch_active:
+            self.end_quads()
+        if self._sprite_batch_kind == kind:
+            return
+        if self._sprite_batch_kind is not None:
+            self.end_sprites()
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+        # Avoid depth writes from fully transparent texels.
+        glEnable(GL_ALPHA_TEST)
+        glAlphaFunc(GL_GREATER, 0.01)
+        glEnable(GL_TEXTURE_2D)
+        glBindTexture(GL_TEXTURE_2D, tex)
+        glBegin(GL_QUADS)
+        self._sprite_batch_kind = kind
+
+    def end_sprites(self) -> None:
+        if self._sprite_batch_kind is None:
+            return
+        glEnd()
+        glBindTexture(GL_TEXTURE_2D, 0)
+        glDisable(GL_TEXTURE_2D)
+        glDisable(GL_ALPHA_TEST)
+        glDisable(GL_BLEND)
+        self._sprite_batch_kind = None
+
+    def sprite_center(
+        self,
+        kind: str,
+        x: float,
+        y: float,
+        size: int,
+        color: tuple[int, int, int],
+        depth: float | None = None,
+    ) -> None:
+        if self._sprite_batch_kind != kind:
+            self.begin_sprites(kind)
+        half = size / 2
+        z = 0.0 if depth is None else -depth
+        glColor3ub(*color)
+        glTexCoord2f(0.0, 1.0)
+        glVertex3f(x - half, y - half, z)
+        glTexCoord2f(1.0, 1.0)
+        glVertex3f(x + half, y - half, z)
+        glTexCoord2f(1.0, 0.0)
+        glVertex3f(x + half, y + half, z)
+        glTexCoord2f(0.0, 0.0)
+        glVertex3f(x - half, y + half, z)
 
     def rect_center(
         self,
@@ -217,12 +347,18 @@ class GLPrimitives:
         # With our ortho setup, positive Z maps "closer" in depth after projection.
         # Negate so larger logical depth (farther) ends up farther in depth buffer.
         z = 0.0 if depth is None else -depth
-        glBegin(GL_QUADS)
-        glVertex3f(x - half, y - half, z)
-        glVertex3f(x + half, y - half, z)
-        glVertex3f(x + half, y + half, z)
-        glVertex3f(x - half, y + half, z)
-        glEnd()
+        if self._quad_batch_active:
+            glVertex3f(x - half, y - half, z)
+            glVertex3f(x + half, y - half, z)
+            glVertex3f(x + half, y + half, z)
+            glVertex3f(x - half, y + half, z)
+        else:
+            glBegin(GL_QUADS)
+            glVertex3f(x - half, y - half, z)
+            glVertex3f(x + half, y - half, z)
+            glVertex3f(x + half, y + half, z)
+            glVertex3f(x - half, y + half, z)
+            glEnd()
 
     def line(
         self,

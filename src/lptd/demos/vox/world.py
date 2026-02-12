@@ -137,7 +137,7 @@ def generate_chunk(cx: int, cz: int) -> None:
     key = (cx, cz)
     state.chunks[key] = chunk_array
 
-    if random.random() < 0.002:
+    if random.random() < config.BUNNY_SPAWN_CHANCE:
         entity_list.append(generate_bunny(cx, cz, chunk_array))
 
     state.chunk_entities[key] = entity_list

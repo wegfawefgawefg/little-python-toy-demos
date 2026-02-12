@@ -18,4 +18,4 @@ render_w = 240
 render_h = 160
 
 # Runtime-adjustable chunk view radius.
-view_radius = 4
+view_radius = 1
