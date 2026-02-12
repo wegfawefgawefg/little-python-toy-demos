@@ -87,9 +87,8 @@ def draw_scene(prims, draw_list) -> None:
 
     for item in draw_list:
         if item[1] == "block":
-            depth, _, proj, factor, color, brightness = item
+            depth, _, proj, size, color, brightness = item
             sx, sy = proj
-            size = max(1, int(1.3 * factor))
             mod_color = scale_color(color, brightness)
             prims.rect_center(sx, sy, size, mod_color, depth=_depth_norm(depth))
         elif item[1] == "grass":

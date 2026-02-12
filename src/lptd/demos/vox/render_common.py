@@ -3,7 +3,45 @@ from __future__ import annotations
 import math
 
 from . import config, state
+from .camera import (
+    build_view_mat4,
+    build_view_rotation_mat3,
+    project_point_vec3,
+    world_to_camera_vec3,
+)
 from .world import rebuild_chunk_draw_blocks
+from lptd.linalg import Vec3
+
+
+def _estimate_block_screen_size(
+    cam: Vec3,
+    sx: float,
+    sy: float,
+    factor: float,
+    axis_x_cam: Vec3,
+    axis_z_cam: Vec3,
+    half_w: float,
+    half_h: float,
+) -> int:
+    """Estimate pixel coverage from projected spacing of adjacent voxel centers."""
+
+    def spacing_to_axis(axis: Vec3) -> float:
+        nz = cam.z + axis.z
+        if nz <= 0.1:
+            return 0.0
+        nf = config.FOV / nz
+        nsx = (cam.x + axis.x) * nf + half_w
+        nsy = -(cam.y + axis.y) * nf + half_h
+        dx = nsx - sx
+        dy = nsy - sy
+        return math.sqrt(dx * dx + dy * dy)
+
+    spacing = max(spacing_to_axis(axis_x_cam), spacing_to_axis(axis_z_cam))
+    if spacing <= 0.0:
+        spacing = 1.3 * factor
+    # Slight overlap bias to avoid hole patterns on sloped terrain.
+    size = int(math.ceil(spacing * 1.08 + 0.35))
+    return max(1, min(64, size))
 
 
 def gather_draw_list(pcx: int, pcz: int, sort_items: bool = True):
@@ -14,14 +52,11 @@ def gather_draw_list(pcx: int, pcz: int, sort_items: bool = True):
     chunk_half_y = config.CHUNK_HEIGHT * 0.5
     chunk_radius = math.sqrt(chunk_half_xz**2 + chunk_half_y**2 + chunk_half_xz**2)
 
-    cam_x = state.cam_pos[0]
-    cam_y = state.cam_pos[1] + config.PLAYER_HEIGHT
-    cam_z = state.cam_pos[2]
-
-    cos_y = math.cos(state.cam_yaw)
-    sin_y = math.sin(state.cam_yaw)
-    cos_p = math.cos(state.cam_pitch)
-    sin_p = math.sin(state.cam_pitch)
+    cam_view = Vec3(state.cam_pos[0], state.cam_pos[1] + config.PLAYER_HEIGHT, state.cam_pos[2])
+    view_rot = build_view_rotation_mat3()
+    view_m4 = build_view_mat4()
+    axis_x_cam = view_rot @ Vec3(1.0, 0.0, 0.0)
+    axis_z_cam = view_rot @ Vec3(0.0, 0.0, 1.0)
 
     vr = max(1, int(state.view_radius))
     # Tie render-depth culling to runtime view radius so +/- has visible effect.
@@ -32,13 +67,10 @@ def gather_draw_list(pcx: int, pcz: int, sort_items: bool = True):
             chunk_center_x = cx * config.CHUNK_SIZE + chunk_half_xz
             chunk_center_y = chunk_half_y
             chunk_center_z = cz * config.CHUNK_SIZE + chunk_half_xz
-            rx = chunk_center_x - cam_x
-            ry = chunk_center_y - cam_y
-            rz = chunk_center_z - cam_z
-            cx1 = rx * cos_y - rz * sin_y
-            cz1 = rx * sin_y + rz * cos_y
-            cy1 = ry * cos_p - cz1 * sin_p
-            cz2 = ry * sin_p + cz1 * cos_p
+            chunk_cam = view_m4.transform_point(Vec3(chunk_center_x, chunk_center_y, chunk_center_z))
+            cx1 = chunk_cam.x
+            cy1 = chunk_cam.y
+            cz2 = chunk_cam.z
 
             # Chunk-level frustum culling: conservative sphere test.
             if cz2 + chunk_radius <= 0.1:
@@ -60,25 +92,17 @@ def gather_draw_list(pcx: int, pcz: int, sort_items: bool = True):
                 x0 = cx * config.CHUNK_SIZE
                 z0 = cz * config.CHUNK_SIZE
                 for lx, ly, lz, bid in blocks:
-                    wx = x0 + lx + 0.5
-                    wy = ly + 0.5
-                    wz = z0 + lz + 0.5
+                    world = Vec3(x0 + lx + 0.5, ly + 0.5, z0 + lz + 0.5)
+                    cam = world_to_camera_vec3(world, view_rot, cam_view)
 
-                    x = wx - cam_x
-                    y = wy - cam_y
-                    z = wz - cam_z
-
-                    x1 = x * cos_y - z * sin_y
-                    z1 = x * sin_y + z * cos_y
-                    y1 = y * cos_p - z1 * sin_p
-                    z2 = y * sin_p + z1 * cos_p
-
-                    if z2 <= 0.1 or z2 > max_dist:
+                    if cam.z <= 0.1 or cam.z > max_dist:
                         continue
 
-                    factor = config.FOV / z2
-                    sx = x1 * factor + half_w
-                    sy = -y1 * factor + half_h
+                    proj, factor = project_point_vec3(cam)
+                    if proj is None:
+                        continue
+                    sx = proj.x
+                    sy = proj.y
 
                     if (
                         sx < -state.render_w
@@ -88,13 +112,23 @@ def gather_draw_list(pcx: int, pcz: int, sort_items: bool = True):
                     ):
                         continue
 
-                    brightness = max(0, 1 - (z2 / max_dist) ** 2)
+                    brightness = max(0, 1 - (cam.z / max_dist) ** 2)
+                    block_px_size = _estimate_block_screen_size(
+                        cam,
+                        sx,
+                        sy,
+                        factor,
+                        axis_x_cam,
+                        axis_z_cam,
+                        half_w,
+                        half_h,
+                    )
                     combined.append(
                         (
-                            z2,
+                            cam.z,
                             "block",
                             (sx, sy),
-                            factor,
+                            block_px_size,
                             config.ID_TO_COLOR[bid],
                             brightness,
                         )
@@ -103,21 +137,16 @@ def gather_draw_list(pcx: int, pcz: int, sort_items: bool = True):
             if key in state.chunk_entities:
                 for entity in state.chunk_entities[key]:
                     pos = entity["pos"]
-                    x = pos[0] - cam_x
-                    y = pos[1] - cam_y
-                    z = pos[2] - cam_z
+                    cam = world_to_camera_vec3(Vec3(pos[0], pos[1], pos[2]), view_rot, cam_view)
 
-                    x1 = x * cos_y - z * sin_y
-                    z1 = x * sin_y + z * cos_y
-                    y1 = y * cos_p - z1 * sin_p
-                    z2 = y * sin_p + z1 * cos_p
-
-                    if z2 <= 0.1 or z2 > max_dist:
+                    if cam.z <= 0.1 or cam.z > max_dist:
                         continue
 
-                    factor = config.FOV / z2
-                    sx = x1 * factor + half_w
-                    sy = -y1 * factor + half_h
+                    proj, factor = project_point_vec3(cam)
+                    if proj is None:
+                        continue
+                    sx = proj.x
+                    sy = proj.y
                     if (
                         sx < -state.render_w
                         or sx > state.render_w * 2
@@ -126,7 +155,7 @@ def gather_draw_list(pcx: int, pcz: int, sort_items: bool = True):
                     ):
                         continue
                     proj = (sx, sy)
-                    depth = z2
+                    depth = cam.z
                     et = entity["type"]
                     if et == "grass":
                         combined.append(

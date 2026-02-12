@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import math
-
 from . import config, state
+from lptd.linalg import Mat3, Mat4, Vec2, Vec3
 
 
 def project_point(point):
@@ -15,22 +14,37 @@ def project_point(point):
     return (sx, sy), factor
 
 
+def project_point_vec3(point: Vec3):
+    if point.z <= 0.1:
+        return None, None
+    factor = config.FOV / point.z
+    return Vec2(point.x * factor + state.render_w / 2, -point.y * factor + state.render_h / 2), factor
+
+
+def build_view_rotation_mat3() -> Mat3:
+    # Match the existing manual transform convention:
+    # yaw uses a negative angle here, then pitch.
+    return Mat3.rotate_x(state.cam_pitch) @ Mat3.rotate_y(-state.cam_yaw)
+
+
+def build_view_mat4() -> Mat4:
+    cam_y = state.cam_pos[1] + config.PLAYER_HEIGHT
+    return (
+        Mat4.rotate_x(state.cam_pitch)
+        @ Mat4.rotate_y(-state.cam_yaw)
+        @ Mat4.translate(-state.cam_pos[0], -cam_y, -state.cam_pos[2])
+    )
+
+
+def world_to_camera_vec3(world: Vec3, view_rot: Mat3, cam_view: Vec3) -> Vec3:
+    return view_rot @ (world - cam_view)
+
+
 def world_to_camera(point):
-    cam_view = (state.cam_pos[0], state.cam_pos[1] + config.PLAYER_HEIGHT, state.cam_pos[2])
-    x = point[0] - cam_view[0]
-    y = point[1] - cam_view[1]
-    z = point[2] - cam_view[2]
-
-    cos_y = math.cos(state.cam_yaw)
-    sin_y = math.sin(state.cam_yaw)
-    x1 = x * cos_y - z * sin_y
-    z1 = x * sin_y + z * cos_y
-
-    cos_p = math.cos(state.cam_pitch)
-    sin_p = math.sin(state.cam_pitch)
-    y1 = y * cos_p - z1 * sin_p
-    z2 = y * sin_p + z1 * cos_p
-    return (x1, y1, z2)
+    view_rot = build_view_rotation_mat3()
+    cam_view = Vec3(state.cam_pos[0], state.cam_pos[1] + config.PLAYER_HEIGHT, state.cam_pos[2])
+    v = world_to_camera_vec3(Vec3(point[0], point[1], point[2]), view_rot, cam_view)
+    return (v.x, v.y, v.z)
 
 
 def scale_color(color, brightness: float):

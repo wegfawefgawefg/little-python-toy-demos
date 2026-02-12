@@ -6,6 +6,4 @@ from .scene_draw import draw_scene
 
 
 def draw_frame(pcx: int, pcz: int) -> None:
-    # For screen-space billboard squares, painter ordering is more correct than
-    # depth-buffered quads with a single depth value per primitive.
-    draw_scene(GLPrimitives(), gather_draw_list(pcx, pcz, sort_items=True))
+    draw_scene(GLPrimitives(), gather_draw_list(pcx, pcz, sort_items=False))

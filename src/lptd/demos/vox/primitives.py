@@ -6,6 +6,7 @@ import numpy as np
 import pygame
 from OpenGL.GL import (
     GL_COLOR_BUFFER_BIT,
+    GL_DEPTH_BUFFER_BIT,
     GL_DEPTH_TEST,
     GL_LINES,
     GL_QUADS,
@@ -15,7 +16,6 @@ from OpenGL.GL import (
     glClear,
     glClearColor,
     glColor3ub,
-    glDisable,
     glEnable,
     glEnd,
     glLineWidth,
@@ -201,10 +201,8 @@ class GLPrimitives:
     def clear(self, color: tuple[int, int, int]) -> None:
         r, g, b = [c / 255.0 for c in color]
         glClearColor(r, g, b, 1.0)
-        # Billboard/sprite-style quads are painter-sorted; disable depth test to
-        # avoid incorrect occlusion from single-depth screen-space quads.
-        glDisable(GL_DEPTH_TEST)
-        glClear(GL_COLOR_BUFFER_BIT)
+        glEnable(GL_DEPTH_TEST)
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
     def rect_center(
         self,
