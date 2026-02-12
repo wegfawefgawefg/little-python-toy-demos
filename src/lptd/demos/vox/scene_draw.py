@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-from . import config
+from . import config, state
 from .camera import scale_color
 from .world import add_color_offset
 
 
 def _depth_norm(depth: float) -> float:
+    vr = max(1, int(state.view_radius))
+    max_depth = max(float(config.BLOCK_MAX_DIST), float(vr * config.CHUNK_SIZE))
     # Map camera depth to [0,1] for GL depth testing (near=0, far=1).
-    z = depth / max(0.001, float(config.BLOCK_MAX_DIST))
+    z = depth / max(0.001, max_depth)
     return max(0.0, min(1.0, z))
 
 
@@ -94,7 +96,9 @@ def draw_scene(prims, draw_list) -> None:
         elif item[1] == "grass":
             depth, _, proj, factor, blades, color_offset = item
             sx, sy = proj
-            brightness = max(0, 1 - (depth / config.BLOCK_MAX_DIST) ** 2)
+            vr = max(1, int(state.view_radius))
+            max_depth = max(float(config.BLOCK_MAX_DIST), float(vr * config.CHUNK_SIZE))
+            brightness = max(0, 1 - (depth / max_depth) ** 2)
             base_grass = add_color_offset(config.GRASS_COLOR, color_offset)
             final_grass_color = scale_color(base_grass, brightness)
             base_line = max(1, int((3 * factor) / 4))

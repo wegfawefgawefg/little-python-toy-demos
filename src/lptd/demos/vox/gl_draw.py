@@ -8,7 +8,7 @@ from OpenGL.GL import (
     GL_DEPTH_TEST,
     GL_FRAMEBUFFER,
     GL_FRAMEBUFFER_COMPLETE,
-    GL_LEQUAL,
+    GL_LESS,
     GL_MODELVIEW,
     GL_RENDERBUFFER,
     GL_PROJECTION,
@@ -77,7 +77,7 @@ def _setup_ortho_with_viewport(
     if enable_depth:
         glEnable(GL_DEPTH_TEST)
         glDepthMask(True)
-        glDepthFunc(GL_LEQUAL)
+        glDepthFunc(GL_LESS)
     else:
         glDisable(GL_DEPTH_TEST)
 
