@@ -11,7 +11,7 @@ from .hud import draw_status
 from .player import update as update_player
 from .primitives import GLPrimitives, SoftPrimitives
 from .sim import update_entities
-from .world import ensure_chunks_around
+from .world import ensure_chunks_around, ensure_chunks_in_sight
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -72,6 +72,7 @@ def main(argv: list[str] | None = None) -> None:
         pcx = int(math.floor(state.cam_pos[0] / config.CHUNK_SIZE))
         pcz = int(math.floor(state.cam_pos[2] / config.CHUNK_SIZE))
         ensure_chunks_around(pcx, pcz)
+        ensure_chunks_in_sight(pcx, pcz)
 
         update_entities(dt)
         fps = clock.get_fps()

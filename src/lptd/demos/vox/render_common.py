@@ -6,6 +6,7 @@ from . import config, state
 from .camera import (
     build_view_mat4,
     build_view_rotation_mat3,
+    focal_length_px,
     project_point_vec3,
     world_to_camera_vec3,
 )
@@ -22,6 +23,7 @@ def _estimate_block_screen_size(
     axis_z_cam: Vec3,
     half_w: float,
     half_h: float,
+    focal_px: float,
 ) -> int:
     """Estimate pixel coverage from projected spacing of adjacent voxel centers."""
 
@@ -29,7 +31,7 @@ def _estimate_block_screen_size(
         nz = cam.z + axis.z
         if nz <= 0.1:
             return 0.0
-        nf = config.FOV / nz
+        nf = focal_px / nz
         nsx = (cam.x + axis.x) * nf + half_w
         nsy = -(cam.y + axis.y) * nf + half_h
         dx = nsx - sx
@@ -51,6 +53,7 @@ def gather_draw_list(pcx: int, pcz: int, sort_items: bool = True):
     chunk_half_xz = config.CHUNK_SIZE * 0.5
     chunk_half_y = config.CHUNK_HEIGHT * 0.5
     chunk_radius = math.sqrt(chunk_half_xz**2 + chunk_half_y**2 + chunk_half_xz**2)
+    focal_px = focal_length_px()
 
     cam_view = Vec3(state.cam_pos[0], state.cam_pos[1] + config.PLAYER_HEIGHT, state.cam_pos[2])
     view_rot = build_view_rotation_mat3()
@@ -78,8 +81,8 @@ def gather_draw_list(pcx: int, pcz: int, sort_items: bool = True):
             if cz2 - chunk_radius >= max_dist:
                 continue
             z_for_fov = max(0.1, cz2)
-            x_limit = (half_w * z_for_fov / config.FOV) + chunk_radius
-            y_limit = (half_h * z_for_fov / config.FOV) + chunk_radius
+            x_limit = (half_w * z_for_fov / focal_px) + chunk_radius
+            y_limit = (half_h * z_for_fov / focal_px) + chunk_radius
             if abs(cx1) > x_limit or abs(cy1) > y_limit:
                 continue
 
@@ -122,6 +125,7 @@ def gather_draw_list(pcx: int, pcz: int, sort_items: bool = True):
                         axis_z_cam,
                         half_w,
                         half_h,
+                        focal_px,
                     )
                     combined.append(
                         (

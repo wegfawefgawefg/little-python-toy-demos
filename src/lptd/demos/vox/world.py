@@ -307,3 +307,33 @@ def ensure_chunks_around(pcx: int, pcz: int) -> None:
             if (cx - pcx) ** 2 + (cz - pcz) ** 2 <= vr**2:
                 if (cx, cz) not in state.chunks:
                     generate_chunk(cx, cz)
+
+
+def ensure_chunks_in_sight(pcx: int, pcz: int) -> None:
+    """Prefetch chunks in front of the camera so looking around generates terrain."""
+    vr = max(1, int(state.view_radius))
+    cam_x = state.cam_pos[0]
+    cam_z = state.cam_pos[2]
+    fx = math.sin(state.cam_yaw)
+    fz = math.cos(state.cam_yaw)
+    half_angle = math.radians(float(config.FOV) * 0.5)
+    # Slightly wider than visible frustum to avoid pop-in at the edge.
+    cos_limit = math.cos(min(math.pi - 0.01, half_angle + 0.25))
+
+    for cx in range(pcx - vr, pcx + vr + 1):
+        for cz in range(pcz - vr, pcz + vr + 1):
+            key = (cx, cz)
+            if key in state.chunks:
+                continue
+            center_x = cx * config.CHUNK_SIZE + config.CHUNK_SIZE * 0.5
+            center_z = cz * config.CHUNK_SIZE + config.CHUNK_SIZE * 0.5
+            dx = center_x - cam_x
+            dz = center_z - cam_z
+            dist2 = dx * dx + dz * dz
+            if dist2 <= 1e-6:
+                generate_chunk(cx, cz)
+                continue
+            inv_len = 1.0 / math.sqrt(dist2)
+            ndot = (dx * fx + dz * fz) * inv_len
+            if ndot >= cos_limit:
+                generate_chunk(cx, cz)

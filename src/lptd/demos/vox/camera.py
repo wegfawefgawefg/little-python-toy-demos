@@ -1,14 +1,23 @@
 from __future__ import annotations
 
+import math
+
 from . import config, state
 from lptd.linalg import Mat3, Mat4, Vec2, Vec3
+
+
+def focal_length_px() -> float:
+    # True horizontal FOV in degrees -> focal length in pixels.
+    half_w = state.render_w * 0.5
+    half_angle = math.radians(float(config.FOV) * 0.5)
+    return half_w / max(1e-6, math.tan(half_angle))
 
 
 def project_point(point):
     x, y, z = point
     if z <= 0.1:
         return None, None
-    factor = config.FOV / z
+    factor = focal_length_px() / z
     sx = x * factor + state.render_w / 2
     sy = -y * factor + state.render_h / 2
     return (sx, sy), factor
@@ -17,7 +26,7 @@ def project_point(point):
 def project_point_vec3(point: Vec3):
     if point.z <= 0.1:
         return None, None
-    factor = config.FOV / point.z
+    factor = focal_length_px() / point.z
     return Vec2(point.x * factor + state.render_w / 2, -point.y * factor + state.render_h / 2), factor
 
 

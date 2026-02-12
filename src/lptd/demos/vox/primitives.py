@@ -43,11 +43,26 @@ from OpenGL.GL import (
 )
 
 _ASSET_DIR = Path(__file__).with_name("assets")
+_SPRITE_FILES = {
+    "grass": "grass_sprite.png",
+    "bunny": "bunny_sprite.png",
+    "flower_yellow": "flower_yellow.png",
+    "flower_red": "flower_red.png",
+    "flower_pink": "flower_pink.png",
+}
+
+
+def _load_sprite_surface(kind: str) -> pygame.Surface:
+    filename = _SPRITE_FILES.get(kind)
+    if filename is None:
+        raise ValueError(f"unknown sprite kind: {kind}")
+    return pygame.image.load(str(_ASSET_DIR / filename)).convert_alpha()
 
 
 class SoftPrimitives:
     def __init__(self, surface: pygame.Surface):
         self.surface = surface
+        self._sprite_cache: dict[str, pygame.Surface] = {}
 
     def clear(self, color: tuple[int, int, int]) -> None:
         self.surface.fill(color)
@@ -88,6 +103,33 @@ class SoftPrimitives:
     ) -> None:
         pygame.draw.circle(self.surface, color, (int(x), int(y)), radius)
 
+    def begin_sprites(self, kind: str) -> None:
+        _ = kind
+
+    def end_sprites(self) -> None:
+        pass
+
+    def sprite_center(
+        self,
+        kind: str,
+        x: float,
+        y: float,
+        size: int,
+        color: tuple[int, int, int],
+        depth: float | None = None,
+    ) -> None:
+        _ = depth
+        if size <= 0:
+            return
+        sprite = self._sprite_cache.get(kind)
+        if sprite is None:
+            sprite = _load_sprite_surface(kind)
+            self._sprite_cache[kind] = sprite
+        scaled = pygame.transform.scale(sprite, (size, size))
+        tinted = scaled.copy()
+        tinted.fill((*color, 255), special_flags=pygame.BLEND_RGBA_MULT)
+        self.surface.blit(tinted, (int(x - size * 0.5), int(y - size * 0.5)))
+
 
 class SoftZPrimitives:
     """Low-res software rasterizer with per-pixel z-buffer."""
@@ -97,6 +139,7 @@ class SoftZPrimitives:
         self.height = int(height)
         self.color = np.zeros((self.height, self.width, 3), dtype=np.uint8)
         self.depth = np.full((self.height, self.width), np.inf, dtype=np.float32)
+        self._sprite_cache: dict[str, pygame.Surface] = {}
 
     def clear(self, color: tuple[int, int, int]) -> None:
         self.color[:, :, 0] = color[0]
@@ -218,6 +261,72 @@ class SoftZPrimitives:
         mask = (xx - x) * (xx - x) + (yy - y) * (yy - y) <= r * r
         self._write_mask(xx, yy, mask, depth, color)
 
+    def begin_sprites(self, kind: str) -> None:
+        _ = kind
+
+    def end_sprites(self) -> None:
+        pass
+
+    def sprite_center(
+        self,
+        kind: str,
+        x: float,
+        y: float,
+        size: int,
+        color: tuple[int, int, int],
+        depth: float | None = None,
+    ) -> None:
+        if size <= 0:
+            return
+        sprite = self._sprite_cache.get(kind)
+        if sprite is None:
+            sprite = _load_sprite_surface(kind)
+            self._sprite_cache[kind] = sprite
+        scaled = pygame.transform.scale(sprite, (size, size))
+        rgb = np.transpose(pygame.surfarray.array3d(scaled), (1, 0, 2)).astype(np.uint16)
+        alpha = np.transpose(pygame.surfarray.array_alpha(scaled), (1, 0))
+        if rgb.size == 0:
+            return
+        rgb[:, :, 0] = (rgb[:, :, 0] * color[0]) // 255
+        rgb[:, :, 1] = (rgb[:, :, 1] * color[1]) // 255
+        rgb[:, :, 2] = (rgb[:, :, 2] * color[2]) // 255
+        rgb8 = rgb.astype(np.uint8)
+
+        x0 = int(math.floor(x - size * 0.5))
+        y0 = int(math.floor(y - size * 0.5))
+        x1 = x0 + size
+        y1 = y0 + size
+
+        cx0 = max(0, x0)
+        cy0 = max(0, y0)
+        cx1 = min(self.width, x1)
+        cy1 = min(self.height, y1)
+        if cx0 >= cx1 or cy0 >= cy1:
+            return
+
+        sx0 = cx0 - x0
+        sy0 = cy0 - y0
+        sx1 = sx0 + (cx1 - cx0)
+        sy1 = sy0 + (cy1 - cy0)
+
+        src_rgb = rgb8[sy0:sy1, sx0:sx1]
+        src_a = alpha[sy0:sy1, sx0:sx1]
+        mask = src_a > 0
+        if not np.any(mask):
+            return
+
+        dst_depth = self.depth[cy0:cy1, cx0:cx1]
+        dst_color = self.color[cy0:cy1, cx0:cx1]
+        if depth is None:
+            dst_color[mask] = src_rgb[mask]
+            return
+        d = float(depth)
+        keep = mask & (d < dst_depth)
+        if not np.any(keep):
+            return
+        dst_depth[keep] = d
+        dst_color[keep] = src_rgb[keep]
+
 
 class GLPrimitives:
     def __init__(self) -> None:
@@ -248,20 +357,7 @@ class GLPrimitives:
         if tex is not None:
             return tex
 
-        if kind == "grass":
-            path = _ASSET_DIR / "grass_sprite.png"
-        elif kind == "bunny":
-            path = _ASSET_DIR / "bunny_sprite.png"
-        elif kind == "flower_yellow":
-            path = _ASSET_DIR / "flower_yellow.png"
-        elif kind == "flower_red":
-            path = _ASSET_DIR / "flower_red.png"
-        elif kind == "flower_pink":
-            path = _ASSET_DIR / "flower_pink.png"
-        else:
-            raise ValueError(f"unknown sprite kind: {kind}")
-
-        surf = pygame.image.load(str(path)).convert_alpha()
+        surf = _load_sprite_surface(kind)
         w, h = surf.get_size()
         pixels = pygame.image.tobytes(surf, "RGBA", True)
         tex = glGenTextures(1)
