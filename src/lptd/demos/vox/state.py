@@ -16,3 +16,6 @@ grounded = False
 # Internal scene render resolution (set at startup from CLI).
 render_w = 240
 render_h = 160
+
+# Runtime-adjustable chunk view radius.
+view_radius = 4

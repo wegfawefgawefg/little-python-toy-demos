@@ -7,7 +7,7 @@ import sys
 import pygame
 
 from . import config, state
-from .hud import draw_fps
+from .hud import draw_status
 from .player import update as update_player
 from .primitives import GLPrimitives, SoftPrimitives
 from .sim import update_entities
@@ -34,6 +34,7 @@ def main(argv: list[str] | None = None) -> None:
     pygame.init()
     state.render_w = max(1, config.WIDTH // args.render_scale)
     state.render_h = max(1, config.HEIGHT // args.render_scale)
+    state.view_radius = int(config.VIEW_RADIUS)
 
     if args.renderer == "gl":
         pygame.display.set_mode((config.WIDTH, config.HEIGHT), pygame.OPENGL | pygame.DOUBLEBUF)
@@ -61,6 +62,10 @@ def main(argv: list[str] | None = None) -> None:
             elif event.type == pygame.KEYDOWN and event.key in (pygame.K_ESCAPE, pygame.K_q):
                 pygame.quit()
                 sys.exit()
+            elif event.type == pygame.KEYDOWN and event.key in (pygame.K_KP_PLUS, pygame.K_EQUALS):
+                state.view_radius = min(16, state.view_radius + 1)
+            elif event.type == pygame.KEYDOWN and event.key in (pygame.K_KP_MINUS, pygame.K_MINUS):
+                state.view_radius = max(1, state.view_radius - 1)
 
         update_player(dt)
 
@@ -77,13 +82,13 @@ def main(argv: list[str] | None = None) -> None:
             blit_lowres_to_screen(config.WIDTH, config.HEIGHT)
             # Draw HUD at native window resolution so text stays crisp.
             setup_ortho(config.WIDTH, config.HEIGHT)
-            draw_fps(GLPrimitives(), fps)
+            draw_status(GLPrimitives(), fps, state.view_radius)
             pygame.display.flip()
         else:
             draw_frame(render_surf, pcx, pcz)
             scaled = pygame.transform.scale(render_surf, (config.WIDTH, config.HEIGHT))
             screen.blit(scaled, (0, 0))
-            draw_fps(SoftPrimitives(screen), fps)
+            draw_status(SoftPrimitives(screen), fps, state.view_radius)
             pygame.display.flip()
 
         clock.tick(config.FPS_LIMIT)

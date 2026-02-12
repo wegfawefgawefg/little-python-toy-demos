@@ -243,8 +243,9 @@ def generate_tree_at(x: int, z: int, ground_h: int) -> None:
 
 
 def ensure_chunks_around(pcx: int, pcz: int) -> None:
-    for cx in range(pcx - config.VIEW_RADIUS, pcx + config.VIEW_RADIUS + 1):
-        for cz in range(pcz - config.VIEW_RADIUS, pcz + config.VIEW_RADIUS + 1):
-            if (cx - pcx) ** 2 + (cz - pcz) ** 2 <= config.VIEW_RADIUS**2:
+    vr = max(1, int(state.view_radius))
+    for cx in range(pcx - vr, pcx + vr + 1):
+        for cz in range(pcz - vr, pcz + vr + 1):
+            if (cx - pcx) ** 2 + (cz - pcz) ** 2 <= vr**2:
                 if (cx, cz) not in state.chunks:
                     generate_chunk(cx, cz)

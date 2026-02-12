@@ -15,7 +15,9 @@ _FONT_5X7 = {
     "9": ["01110", "10001", "10001", "01111", "00001", "00010", "01100"],
     "F": ["11111", "10000", "10000", "11110", "10000", "10000", "10000"],
     "P": ["11110", "10001", "10001", "11110", "10000", "10000", "10000"],
+    "R": ["11110", "10001", "10001", "11110", "10100", "10010", "10001"],
     "S": ["01111", "10000", "10000", "01110", "00001", "00001", "11110"],
+    "V": ["10001", "10001", "10001", "10001", "10001", "01010", "00100"],
 }
 
 
@@ -32,7 +34,8 @@ def _draw_text(prims, x: int, y: int, text: str, color: tuple[int, int, int], sc
         cursor_x += 6 * scale
 
 
-def draw_fps(prims, fps: float) -> None:
-    label = f"FPS:{int(round(fps)):3d}"
-    _draw_text(prims, 8, 8, label, (255, 255, 255), scale=2)
-
+def draw_status(prims, fps: float, view_radius: int) -> None:
+    fps_label = f"FPS:{int(round(fps)):3d}"
+    vr_label = f"VR:{int(view_radius):2d}"
+    _draw_text(prims, 8, 8, fps_label, (255, 255, 255), scale=2)
+    _draw_text(prims, 8, 26, vr_label, (255, 255, 255), scale=2)

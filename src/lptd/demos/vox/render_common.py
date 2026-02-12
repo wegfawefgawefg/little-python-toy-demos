@@ -10,6 +10,9 @@ def gather_draw_list(pcx: int, pcz: int, sort_items: bool = True):
     combined = []
     half_w = state.render_w / 2
     half_h = state.render_h / 2
+    chunk_half_xz = config.CHUNK_SIZE * 0.5
+    chunk_half_y = config.CHUNK_HEIGHT * 0.5
+    chunk_radius = math.sqrt(chunk_half_xz**2 + chunk_half_y**2 + chunk_half_xz**2)
 
     cam_x = state.cam_pos[0]
     cam_y = state.cam_pos[1] + config.PLAYER_HEIGHT
@@ -20,9 +23,34 @@ def gather_draw_list(pcx: int, pcz: int, sort_items: bool = True):
     cos_p = math.cos(state.cam_pitch)
     sin_p = math.sin(state.cam_pitch)
 
-    for cx in range(pcx - config.VIEW_RADIUS, pcx + config.VIEW_RADIUS + 1):
-        for cz in range(pcz - config.VIEW_RADIUS, pcz + config.VIEW_RADIUS + 1):
+    vr = max(1, int(state.view_radius))
+    # Tie render-depth culling to runtime view radius so +/- has visible effect.
+    max_dist = max(float(config.BLOCK_MAX_DIST), float(vr * config.CHUNK_SIZE))
+    for cx in range(pcx - vr, pcx + vr + 1):
+        for cz in range(pcz - vr, pcz + vr + 1):
             key = (cx, cz)
+            chunk_center_x = cx * config.CHUNK_SIZE + chunk_half_xz
+            chunk_center_y = chunk_half_y
+            chunk_center_z = cz * config.CHUNK_SIZE + chunk_half_xz
+            rx = chunk_center_x - cam_x
+            ry = chunk_center_y - cam_y
+            rz = chunk_center_z - cam_z
+            cx1 = rx * cos_y - rz * sin_y
+            cz1 = rx * sin_y + rz * cos_y
+            cy1 = ry * cos_p - cz1 * sin_p
+            cz2 = ry * sin_p + cz1 * cos_p
+
+            # Chunk-level frustum culling: conservative sphere test.
+            if cz2 + chunk_radius <= 0.1:
+                continue
+            if cz2 - chunk_radius >= max_dist:
+                continue
+            z_for_fov = max(0.1, cz2)
+            x_limit = (half_w * z_for_fov / config.FOV) + chunk_radius
+            y_limit = (half_h * z_for_fov / config.FOV) + chunk_radius
+            if abs(cx1) > x_limit or abs(cy1) > y_limit:
+                continue
+
             if key in state.chunks:
                 blocks = state.chunk_draw_blocks.get(key)
                 if blocks is None:
@@ -45,7 +73,7 @@ def gather_draw_list(pcx: int, pcz: int, sort_items: bool = True):
                     y1 = y * cos_p - z1 * sin_p
                     z2 = y * sin_p + z1 * cos_p
 
-                    if z2 <= 0.1 or z2 > config.BLOCK_MAX_DIST:
+                    if z2 <= 0.1 or z2 > max_dist:
                         continue
 
                     factor = config.FOV / z2
@@ -60,7 +88,7 @@ def gather_draw_list(pcx: int, pcz: int, sort_items: bool = True):
                     ):
                         continue
 
-                    brightness = max(0, 1 - (z2 / config.BLOCK_MAX_DIST) ** 2)
+                    brightness = max(0, 1 - (z2 / max_dist) ** 2)
                     combined.append(
                         (
                             z2,
@@ -84,7 +112,7 @@ def gather_draw_list(pcx: int, pcz: int, sort_items: bool = True):
                     y1 = y * cos_p - z1 * sin_p
                     z2 = y * sin_p + z1 * cos_p
 
-                    if z2 <= 0.1 or z2 > config.BLOCK_MAX_DIST:
+                    if z2 <= 0.1 or z2 > max_dist:
                         continue
 
                     factor = config.FOV / z2
