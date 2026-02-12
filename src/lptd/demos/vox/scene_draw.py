@@ -153,24 +153,22 @@ def draw_scene(prims, draw_list) -> None:
                         _depth_norm_biased(depth, toward_camera=0.2),
                     )
                 )
-            elif it == "flower_patch":
-                _depth, _, _proj, _factor, _patch, flowers_projected = item
-                for flower in flowers_projected:
-                    fdepth = flower["depth"]
-                    ffactor = flower["factor"]
-                    brightness = max(0, 1 - (fdepth / max_depth) ** 2)
-                    shade = max(0, min(255, int(brightness * 255)))
-                    tint = (shade, shade, shade)
-                    sprite_size = max(1, int(flower_size_scale * ffactor))
-                    sprite_instances[_flower_sprite_kind(flower["color"])].append(
-                        (
-                            flower["sx"],
-                            flower["sy"] - max(1, int(0.8 * ffactor)),
-                            sprite_size,
-                            tint,
-                            _depth_norm_biased(fdepth, toward_camera=0.15),
-                        )
+            elif it == "flower":
+                depth, _, proj, factor, color = item
+                sx, sy = proj
+                brightness = max(0, 1 - (depth / max_depth) ** 2)
+                shade = max(0, min(255, int(brightness * 255)))
+                tint = (shade, shade, shade)
+                sprite_size = max(1, int(flower_size_scale * factor))
+                sprite_instances[_flower_sprite_kind(color)].append(
+                    (
+                        sx,
+                        sy - max(1, int(0.8 * factor)),
+                        sprite_size,
+                        tint,
+                        _depth_norm_biased(depth, toward_camera=0.15),
                     )
+                )
             elif it == "bunny":
                 depth, _, proj, factor, _bunny = item
                 sx, sy = proj
@@ -226,6 +224,17 @@ def draw_scene(prims, draw_list) -> None:
                 continue
             depth, _, proj, factor, patch, _flowers_projected = item
             _draw_flower_patch(prims, patch, proj, factor * 0.1, depth=_depth_norm(depth))
+        elif item[1] == "flower":
+            depth, _, proj, factor, color = item
+            sx, sy = proj
+            stem_color = (0, 180, 0)
+            stem_len = max(1, int(0.8 * factor))
+            stem_w = 1
+            prims.line(sx, sy, sx, sy - stem_len, stem_w, stem_color, depth=_depth_norm(depth))
+            petal_radius = max(1, int(0.35 * factor))
+            cx = int(sx)
+            cy = int(sy - stem_len)
+            prims.circle(cx, cy, petal_radius, color, depth=_depth_norm(depth))
         elif item[1] == "bunny":
             if callable(sprite_center):
                 continue

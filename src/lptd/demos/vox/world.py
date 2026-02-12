@@ -42,6 +42,21 @@ def invalidate_chunk_draw_cache(key: tuple[int, int], include_neighbors: bool = 
         state.chunk_draw_blocks.pop(nk, None)
 
 
+def rebuild_chunk_sprite_bases(key: tuple[int, int]) -> None:
+    entries: list[tuple] = []
+    for entity in state.chunk_entities.get(key, []):
+        et = entity["type"]
+        if et == "grass":
+            px, py, pz = entity["pos"]
+            entries.append(("grass", px, py, pz, entity["blades"], entity["color_offset"]))
+        elif et == "flower_patch":
+            bx, by, bz = entity["pos"]
+            for flower in entity["flowers"]:
+                ox, oz = flower["offset"]
+                entries.append(("flower", bx + ox, by, bz + oz, flower["color"]))
+    state.chunk_sprite_bases[key] = entries
+
+
 def rebuild_chunk_draw_blocks(key: tuple[int, int]) -> None:
     chunk = state.chunks[key]
     non_air = np.argwhere(chunk != config.BLOCK_AIR)
@@ -181,6 +196,7 @@ def generate_chunk(cx: int, cz: int) -> None:
         entity_list.append(generate_bunny(cx, cz, chunk_array))
 
     state.chunk_entities[key] = entity_list
+    rebuild_chunk_sprite_bases(key)
 
     for wx, wz, h in tree_requests:
         generate_tree_at(wx, wz, h)

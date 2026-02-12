@@ -9,7 +9,7 @@ from .camera import (
     project_point_vec3,
     world_to_camera_vec3,
 )
-from .world import rebuild_chunk_draw_blocks
+from .world import rebuild_chunk_draw_blocks, rebuild_chunk_sprite_bases
 from lptd.linalg import Vec3
 
 
@@ -134,14 +134,16 @@ def gather_draw_list(pcx: int, pcz: int, sort_items: bool = True):
                         )
                     )
 
-            if key in state.chunk_entities:
-                for entity in state.chunk_entities[key]:
-                    pos = entity["pos"]
-                    cam = world_to_camera_vec3(Vec3(pos[0], pos[1], pos[2]), view_rot, cam_view)
-
+            sprite_bases = state.chunk_sprite_bases.get(key)
+            if sprite_bases is None and key in state.chunk_entities:
+                rebuild_chunk_sprite_bases(key)
+                sprite_bases = state.chunk_sprite_bases.get(key, [])
+            if sprite_bases:
+                for entry in sprite_bases:
+                    et = entry[0]
+                    cam = world_to_camera_vec3(Vec3(entry[1], entry[2], entry[3]), view_rot, cam_view)
                     if cam.z <= 0.1 or cam.z > max_dist:
                         continue
-
                     proj, factor = project_point_vec3(cam)
                     if proj is None:
                         continue
@@ -154,39 +156,33 @@ def gather_draw_list(pcx: int, pcz: int, sort_items: bool = True):
                         or sy > state.render_h * 2
                     ):
                         continue
-                    proj = (sx, sy)
-                    depth = cam.z
-                    et = entity["type"]
                     if et == "grass":
-                        combined.append(
-                            (depth, "grass", proj, factor, entity["blades"], entity["color_offset"])
-                        )
-                    elif et == "flower_patch":
-                        flowers_projected = []
-                        for flower in entity["flowers"]:
-                            ox, oz = flower["offset"]
-                            flower_world = Vec3(pos[0] + ox, pos[1], pos[2] + oz)
-                            fcam = world_to_camera_vec3(flower_world, view_rot, cam_view)
-                            if fcam.z <= 0.1 or fcam.z > max_dist:
-                                continue
-                            fproj, ffactor = project_point_vec3(fcam)
-                            if fproj is None:
-                                continue
-                            flowers_projected.append(
-                                {
-                                    "sx": fproj.x,
-                                    "sy": fproj.y,
-                                    "depth": fcam.z,
-                                    "factor": ffactor,
-                                    "color": flower["color"],
-                                }
-                            )
-                        if flowers_projected:
-                            combined.append(
-                                (depth, "flower_patch", proj, factor, entity, flowers_projected)
-                            )
-                    elif et == "bunny":
-                        combined.append((depth, "bunny", proj, factor, entity))
+                        combined.append((cam.z, "grass", (sx, sy), factor, entry[4], entry[5]))
+                    elif et == "flower":
+                        combined.append((cam.z, "flower", (sx, sy), factor, entry[4]))
+
+            # Bunnies can be dynamic; keep direct entity path.
+            if key in state.chunk_entities:
+                for entity in state.chunk_entities[key]:
+                    if entity["type"] != "bunny":
+                        continue
+                    pos = entity["pos"]
+                    cam = world_to_camera_vec3(Vec3(pos[0], pos[1], pos[2]), view_rot, cam_view)
+                    if cam.z <= 0.1 or cam.z > max_dist:
+                        continue
+                    proj, factor = project_point_vec3(cam)
+                    if proj is None:
+                        continue
+                    sx = proj.x
+                    sy = proj.y
+                    if (
+                        sx < -state.render_w
+                        or sx > state.render_w * 2
+                        or sy < -state.render_h
+                        or sy > state.render_h * 2
+                    ):
+                        continue
+                    combined.append((cam.z, "bunny", (sx, sy), factor, entity))
 
     if sort_items:
         combined.sort(key=lambda item: item[0], reverse=True)

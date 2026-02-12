@@ -2,7 +2,7 @@
 
 This document captures the current performance options for `lptd.demos.vox`, in priority order.
 
-## 1) Chunk Shell Cache (Do Next)
+## 1) Chunk Shell Cache (Implemented)
 
 Build and cache only surface/shell voxel points per chunk (not all non-air voxels).
 
@@ -12,7 +12,7 @@ Build and cache only surface/shell voxel points per chunk (not all non-air voxel
 
 Expected impact: high.
 
-## 2) Chunk-Local Sprite Instance Cache
+## 2) Chunk-Local Sprite Instance Cache (Implemented)
 
 Reduce per-frame Python object churn for billboard entities.
 
