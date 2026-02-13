@@ -89,13 +89,15 @@ def rebuild_chunk_draw_blocks(key: tuple[int, int, int]) -> None:
 
 def generate_flower_patch(base_x: int, base_z: int, ground_h: int) -> dict:
     petal_colors = [(255, 255, 0), (255, 0, 0), (255, 192, 203)]
-    num_flowers = random.randint(5, 8)
+    num_flowers = random.randint(config.FLOWER_PATCH_MIN, config.FLOWER_PATCH_MAX)
+    radius = random.uniform(config.FLOWER_PATCH_RADIUS_MIN, config.FLOWER_PATCH_RADIUS_MAX)
     flowers = []
     for _ in range(num_flowers):
-        offset_x = random.uniform(-2, 2)
-        offset_z = random.uniform(-2, 2)
-        if offset_x**2 + offset_z**2 > 4:
-            continue
+        angle = random.uniform(0.0, math.tau)
+        # sqrt(random()) gives a denser center and softer blob edge.
+        r = radius * math.sqrt(random.random())
+        offset_x = math.cos(angle) * r
+        offset_z = math.sin(angle) * r
         color = random.choice(petal_colors)
         flowers.append({"offset": (offset_x, offset_z), "color": color})
     pos = (base_x + 0.5, ground_h + 1, base_z + 0.5)
@@ -207,7 +209,7 @@ def generate_chunk(cx: int, cy: int, cz: int) -> None:
             if cy == 0:
                 if h >= config.WATER_LEVEL and random.random() < 0.25:
                     entity_list.append(generate_grass(wx, wz, h))
-                if h >= config.WATER_LEVEL and random.random() < 0.05:
+                if h >= config.WATER_LEVEL and random.random() < config.FLOWER_PATCH_CHANCE:
                     entity_list.append(generate_flower_patch(wx, wz, h))
                 if h >= config.WATER_LEVEL and random.random() < 0.001:
                     tree_requests.append((wx, wz, h))
