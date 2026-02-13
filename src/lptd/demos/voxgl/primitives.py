@@ -1,25 +1,32 @@
 from __future__ import annotations
 
+import ctypes
 import math
 from pathlib import Path
 
 import numpy as np
 import pygame
+from OpenGL.GL.shaders import compileProgram, compileShader
 from OpenGL.GL import (
     GL_ALPHA_TEST,
+    GL_ARRAY_BUFFER,
     GL_BLEND,
     GL_COLOR_ARRAY,
     GL_COLOR_BUFFER_BIT,
     GL_DEPTH_BUFFER_BIT,
     GL_DEPTH_TEST,
+    GL_FRAGMENT_SHADER,
     GL_FLOAT,
     GL_GREATER,
     GL_LINES,
     GL_NEAREST,
     GL_ONE_MINUS_SRC_ALPHA,
+    GL_POINTS,
+    GL_PROGRAM_POINT_SIZE,
     GL_QUADS,
     GL_RGBA,
     GL_SRC_ALPHA,
+    GL_STREAM_DRAW,
     GL_TEXTURE_2D,
     GL_TEXTURE_COORD_ARRAY,
     GL_TEXTURE_MAG_FILTER,
@@ -27,30 +34,47 @@ from OpenGL.GL import (
     GL_TRIANGLES,
     GL_TRIANGLE_FAN,
     GL_UNSIGNED_BYTE,
+    GL_UNSIGNED_SHORT,
     GL_VERTEX_ARRAY,
+    GL_VERTEX_SHADER,
     glBegin,
     glAlphaFunc,
+    glBindBuffer,
     glBindTexture,
     glBlendFunc,
+    glBufferData,
     glClear,
     glClearColor,
     glColorPointer,
     glColor3ub,
     glDrawArrays,
     glEnable,
+    glEnableVertexAttribArray,
     glEnableClientState,
     glEnd,
     glDisable,
+    glDisableVertexAttribArray,
     glDisableClientState,
+    glGenBuffers,
     glGenTextures,
+    glGetAttribLocation,
+    glGetUniformLocation,
     glLineWidth,
+    glUniform1f,
+    glUniform3f,
+    glUniform3fv,
+    glUniformMatrix3fv,
+    glUseProgram,
     glTexCoordPointer,
     glTexCoord2f,
     glTexImage2D,
     glTexParameteri,
+    glVertexAttribPointer,
     glVertexPointer,
     glVertex3f,
 )
+
+from . import config
 
 _ASSET_DIR = Path(__file__).with_name("assets")
 _SPRITE_FILES = {
@@ -348,6 +372,14 @@ class GLPrimitives:
         self._sprite_vertices: list[tuple[float, float, float]] = []
         self._sprite_uvs: list[tuple[float, float]] = []
         self._sprite_colors: list[tuple[int, int, int]] = []
+        self._block_prog: int | None = None
+        self._block_vbo: int | None = None
+        self._block_palette = np.zeros((256, 3), dtype=np.float32)
+        for bid, col in config.ID_TO_COLOR.items():
+            if 0 <= int(bid) < 256:
+                self._block_palette[int(bid), 0] = col[0] / 255.0
+                self._block_palette[int(bid), 1] = col[1] / 255.0
+                self._block_palette[int(bid), 2] = col[2] / 255.0
 
     def clear(self, color: tuple[int, int, int]) -> None:
         r, g, b = [c / 255.0 for c in color]
@@ -376,6 +408,141 @@ class GLPrimitives:
             glDisableClientState(GL_COLOR_ARRAY)
             glDisableClientState(GL_VERTEX_ARRAY)
         self._quad_batch_active = False
+
+    def _ensure_block_shader(self) -> None:
+        if self._block_prog is not None and self._block_vbo is not None:
+            return
+
+        vert_src = """
+        #version 120
+        attribute vec2 aOriginXZ;
+        attribute float aIdx;
+        attribute float aBid;
+        uniform vec3 uCamPos;
+        uniform mat3 uViewRot;
+        uniform float uHalfW;
+        uniform float uHalfH;
+        uniform float uFocal;
+        uniform float uMaxDist;
+        uniform float uPointMul;
+        uniform float uPointMax;
+        uniform vec3 uPalette[256];
+        varying vec3 vColor;
+        void main() {
+            float idx = aIdx;
+            float lx = mod(idx, 16.0);
+            float lz = mod(floor(idx / 16.0), 16.0);
+            float ly = floor(idx / 256.0);
+            vec3 world = vec3(aOriginXZ.x + lx + 0.5, ly + 0.5, aOriginXZ.y + lz + 0.5);
+            vec3 cam = uViewRot * (world - uCamPos);
+            if (cam.z <= 0.1 || cam.z > uMaxDist) {
+                gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+                gl_PointSize = 0.0;
+                vColor = vec3(0.0);
+                return;
+            }
+            float proj = uFocal / cam.z;
+            float sx = cam.x * proj + uHalfW;
+            float sy = -cam.y * proj + uHalfH;
+            float ndcX = (sx / uHalfW) - 1.0;
+            float ndcY = 1.0 - (sy / uHalfH);
+            float zn = clamp(cam.z / uMaxDist, 0.0, 1.0);
+            gl_Position = vec4(ndcX, ndcY, zn * 2.0 - 1.0, 1.0);
+            gl_PointSize = clamp(uPointMul * proj, 1.0, uPointMax);
+            int bid = int(aBid + 0.5);
+            vColor = uPalette[bid];
+        }
+        """
+        frag_src = """
+        #version 120
+        varying vec3 vColor;
+        void main() {
+            gl_FragColor = vec4(vColor, 1.0);
+        }
+        """
+        self._block_prog = compileProgram(
+            compileShader(vert_src, GL_VERTEX_SHADER),
+            compileShader(frag_src, GL_FRAGMENT_SHADER),
+        )
+        self._block_vbo = glGenBuffers(1)
+
+    def draw_block_points(
+        self,
+        instances: np.ndarray,
+        cam_x: float,
+        cam_y: float,
+        cam_z: float,
+        view_rot_row_major: list[float],
+        render_w: int,
+        render_h: int,
+        fov_deg: float,
+        max_dist: float,
+    ) -> None:
+        if instances is None or len(instances) == 0:
+            return
+        self._ensure_block_shader()
+        assert self._block_prog is not None
+        assert self._block_vbo is not None
+
+        data = np.ascontiguousarray(instances)
+        stride = data.dtype.itemsize
+        off_ox = data.dtype.fields["ox"][1]
+        off_idx = data.dtype.fields["idx"][1]
+        off_bid = data.dtype.fields["bid"][1]
+
+        glEnable(GL_PROGRAM_POINT_SIZE)
+        glUseProgram(self._block_prog)
+        glBindBuffer(GL_ARRAY_BUFFER, self._block_vbo)
+        glBufferData(GL_ARRAY_BUFFER, data.nbytes, data, GL_STREAM_DRAW)
+
+        loc_origin = glGetAttribLocation(self._block_prog, "aOriginXZ")
+        loc_idx = glGetAttribLocation(self._block_prog, "aIdx")
+        loc_bid = glGetAttribLocation(self._block_prog, "aBid")
+        if loc_origin >= 0:
+            glEnableVertexAttribArray(loc_origin)
+            glVertexAttribPointer(
+                loc_origin, 2, GL_FLOAT, False, stride, ctypes.c_void_p(off_ox)
+            )
+        if loc_idx >= 0:
+            glEnableVertexAttribArray(loc_idx)
+            glVertexAttribPointer(
+                loc_idx, 1, GL_UNSIGNED_SHORT, False, stride, ctypes.c_void_p(off_idx)
+            )
+        if loc_bid >= 0:
+            glEnableVertexAttribArray(loc_bid)
+            glVertexAttribPointer(
+                loc_bid, 1, GL_UNSIGNED_BYTE, False, stride, ctypes.c_void_p(off_bid)
+            )
+
+        half_w = float(render_w) * 0.5
+        half_h = float(render_h) * 0.5
+        half_angle = math.radians(float(fov_deg) * 0.5)
+        focal = half_w / max(1e-6, math.tan(half_angle))
+
+        glUniform3f(glGetUniformLocation(self._block_prog, "uCamPos"), cam_x, cam_y, cam_z)
+        glUniformMatrix3fv(
+            glGetUniformLocation(self._block_prog, "uViewRot"), 1, True, view_rot_row_major
+        )
+        glUniform1f(glGetUniformLocation(self._block_prog, "uHalfW"), half_w)
+        glUniform1f(glGetUniformLocation(self._block_prog, "uHalfH"), half_h)
+        glUniform1f(glGetUniformLocation(self._block_prog, "uFocal"), focal)
+        glUniform1f(glGetUniformLocation(self._block_prog, "uMaxDist"), float(max_dist))
+        glUniform1f(glGetUniformLocation(self._block_prog, "uPointMul"), 1.3)
+        glUniform1f(glGetUniformLocation(self._block_prog, "uPointMax"), 64.0)
+        glUniform3fv(
+            glGetUniformLocation(self._block_prog, "uPalette"), 256, self._block_palette
+        )
+
+        glDrawArrays(GL_POINTS, 0, len(data))
+
+        if loc_origin >= 0:
+            glDisableVertexAttribArray(loc_origin)
+        if loc_idx >= 0:
+            glDisableVertexAttribArray(loc_idx)
+        if loc_bid >= 0:
+            glDisableVertexAttribArray(loc_bid)
+        glBindBuffer(GL_ARRAY_BUFFER, 0)
+        glUseProgram(0)
 
     def _ensure_sprite_texture(self, kind: str) -> int:
         tex = self._sprite_textures.get(kind)

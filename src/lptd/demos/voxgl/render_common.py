@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import numpy as np
 
 from . import config, state
 from .camera import (
@@ -12,6 +13,15 @@ from .camera import (
 )
 from .world import rebuild_chunk_draw_blocks, rebuild_chunk_sprite_bases
 from lptd.linalg import Vec3
+
+BLOCK_INSTANCE_DTYPE = np.dtype(
+    [
+        ("ox", np.float32),
+        ("oz", np.float32),
+        ("idx", np.uint16),
+        ("bid", np.uint8),
+    ]
+)
 
 
 def _estimate_block_screen_size(
@@ -196,3 +206,112 @@ def gather_draw_list(pcx: int, pcz: int, sort_items: bool = True):
     if sort_items:
         combined.sort(key=lambda item: item[0], reverse=True)
     return combined
+
+
+def gather_frame_payload(pcx: int, pcz: int, sort_items: bool = False):
+    """Return (block_instances, sprite_draw_items) for GPU-projected block path."""
+    combined = []
+    block_chunks: list[np.ndarray] = []
+    half_w = state.render_w / 2
+    half_h = state.render_h / 2
+    chunk_half_xz = config.CHUNK_SIZE * 0.5
+    chunk_half_y = config.CHUNK_HEIGHT * 0.5
+    chunk_radius = math.sqrt(chunk_half_xz**2 + chunk_half_y**2 + chunk_half_xz**2)
+    focal_px = focal_length_px()
+
+    cam_view = Vec3(state.cam_pos[0], state.cam_pos[1] + config.PLAYER_HEIGHT, state.cam_pos[2])
+    view_rot = build_view_rotation_mat3()
+    view_m4 = build_view_mat4()
+
+    vr = max(1, int(state.view_radius))
+    max_dist = max(float(config.BLOCK_MAX_DIST), float(vr * config.CHUNK_SIZE))
+    for cx in range(pcx - vr, pcx + vr + 1):
+        for cz in range(pcz - vr, pcz + vr + 1):
+            key = (cx, cz)
+            chunk_center_x = cx * config.CHUNK_SIZE + chunk_half_xz
+            chunk_center_y = chunk_half_y
+            chunk_center_z = cz * config.CHUNK_SIZE + chunk_half_xz
+            chunk_cam = view_m4.transform_point(Vec3(chunk_center_x, chunk_center_y, chunk_center_z))
+            cx1 = chunk_cam.x
+            cy1 = chunk_cam.y
+            cz2 = chunk_cam.z
+
+            if cz2 + chunk_radius <= 0.1:
+                continue
+            if cz2 - chunk_radius >= max_dist:
+                continue
+            z_for_fov = max(0.1, cz2)
+            x_limit = (half_w * z_for_fov / focal_px) + chunk_radius
+            y_limit = (half_h * z_for_fov / focal_px) + chunk_radius
+            if abs(cx1) > x_limit or abs(cy1) > y_limit:
+                continue
+
+            if key in state.chunks:
+                blocks = state.chunk_draw_blocks.get(key)
+                if blocks is None:
+                    rebuild_chunk_draw_blocks(key)
+                    blocks = state.chunk_draw_blocks.get(key)
+                if blocks is not None and len(blocks) > 0:
+                    chunk_instances = np.empty(len(blocks), dtype=BLOCK_INSTANCE_DTYPE)
+                    chunk_instances["ox"] = np.float32(cx * config.CHUNK_SIZE)
+                    chunk_instances["oz"] = np.float32(cz * config.CHUNK_SIZE)
+                    chunk_instances["idx"] = blocks["idx"]
+                    chunk_instances["bid"] = blocks["bid"]
+                    block_chunks.append(chunk_instances)
+
+            sprite_bases = state.chunk_sprite_bases.get(key)
+            if sprite_bases is None and key in state.chunk_entities:
+                rebuild_chunk_sprite_bases(key)
+                sprite_bases = state.chunk_sprite_bases.get(key, [])
+            if sprite_bases:
+                for entry in sprite_bases:
+                    et = entry[0]
+                    cam = world_to_camera_vec3(Vec3(entry[1], entry[2], entry[3]), view_rot, cam_view)
+                    if cam.z <= 0.1 or cam.z > max_dist:
+                        continue
+                    proj, factor = project_point_vec3(cam)
+                    if proj is None:
+                        continue
+                    sx = proj.x
+                    sy = proj.y
+                    if (
+                        sx < -state.render_w
+                        or sx > state.render_w * 2
+                        or sy < -state.render_h
+                        or sy > state.render_h * 2
+                    ):
+                        continue
+                    if et == "grass":
+                        combined.append((cam.z, "grass", (sx, sy), factor, entry[4], entry[5]))
+                    elif et == "flower":
+                        combined.append((cam.z, "flower", (sx, sy), factor, entry[4]))
+
+            if key in state.chunk_entities:
+                for entity in state.chunk_entities[key]:
+                    if entity["type"] != "bunny":
+                        continue
+                    pos = entity["pos"]
+                    cam = world_to_camera_vec3(Vec3(pos[0], pos[1], pos[2]), view_rot, cam_view)
+                    if cam.z <= 0.1 or cam.z > max_dist:
+                        continue
+                    proj, factor = project_point_vec3(cam)
+                    if proj is None:
+                        continue
+                    sx = proj.x
+                    sy = proj.y
+                    if (
+                        sx < -state.render_w
+                        or sx > state.render_w * 2
+                        or sy < -state.render_h
+                        or sy > state.render_h * 2
+                    ):
+                        continue
+                    combined.append((cam.z, "bunny", (sx, sy), factor, entity))
+
+    if sort_items:
+        combined.sort(key=lambda item: item[0], reverse=True)
+    if block_chunks:
+        block_instances = np.concatenate(block_chunks)
+    else:
+        block_instances = np.zeros((0,), dtype=BLOCK_INSTANCE_DTYPE)
+    return block_instances, combined
