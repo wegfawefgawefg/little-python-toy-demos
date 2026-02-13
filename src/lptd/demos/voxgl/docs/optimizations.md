@@ -30,7 +30,7 @@ Replace `glBegin/glEnd` style drawing with vertex arrays/VBOs.
 
 Expected impact: high (especially at larger view ranges), but bigger refactor.
 
-## 4) More Aggressive Culling
+## 4) More Aggressive Culling (Implemented)
 
 Tighten chunk and point rejection before draw-list append.
 

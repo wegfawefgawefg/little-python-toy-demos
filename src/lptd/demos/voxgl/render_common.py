@@ -55,6 +55,65 @@ def _sample_chunk_blocks(blocks: np.ndarray, stride: int, seed: int) -> np.ndarr
     return blocks[:1]
 
 
+def _chunk_in_view(
+    view_m4,
+    x0: float,
+    y0: float,
+    z0: float,
+    half_w: float,
+    half_h: float,
+    focal_px: float,
+    max_dist: float,
+) -> bool:
+    x1 = x0 + float(config.CHUNK_SIZE)
+    y1 = y0 + float(config.CHUNK_HEIGHT)
+    z1 = z0 + float(config.CHUNK_SIZE)
+    corners = (
+        Vec3(x0, y0, z0),
+        Vec3(x1, y0, z0),
+        Vec3(x0, y1, z0),
+        Vec3(x1, y1, z0),
+        Vec3(x0, y0, z1),
+        Vec3(x1, y0, z1),
+        Vec3(x0, y1, z1),
+        Vec3(x1, y1, z1),
+    )
+    cam_corners = [view_m4.transform_point(corner) for corner in corners]
+    zs = [c.z for c in cam_corners]
+    if max(zs) <= 0.1:
+        return False
+    if min(zs) >= max_dist:
+        return False
+
+    vis = [c for c in cam_corners if c.z > 0.1]
+    if not vis:
+        return False
+
+    edge_pad_px = 32.0
+    fx = (half_w + edge_pad_px) / focal_px
+    fy = (half_h + edge_pad_px) / focal_px
+    if all(c.x < -(c.z * fx) for c in vis):
+        return False
+    if all(c.x > (c.z * fx) for c in vis):
+        return False
+    if all(c.y < -(c.z * fy) for c in vis):
+        return False
+    if all(c.y > (c.z * fy) for c in vis):
+        return False
+
+    min_sx = min((c.x * focal_px / c.z) + half_w for c in vis)
+    max_sx = max((c.x * focal_px / c.z) + half_w for c in vis)
+    min_sy = min((-c.y * focal_px / c.z) + half_h for c in vis)
+    max_sy = max((-c.y * focal_px / c.z) + half_h for c in vis)
+    clip_pad_x = float(state.render_w) * 0.35
+    clip_pad_y = float(state.render_h) * 0.35
+    if max_sx < -clip_pad_x or min_sx > (state.render_w + clip_pad_x):
+        return False
+    if max_sy < -clip_pad_y or min_sy > (state.render_h + clip_pad_y):
+        return False
+    return True
+
+
 def _estimate_block_screen_size(
     cam: Vec3,
     sx: float,
@@ -91,9 +150,6 @@ def gather_draw_list(pcx: int, pcy: int, pcz: int, sort_items: bool = True):
     combined = []
     half_w = state.render_w / 2
     half_h = state.render_h / 2
-    chunk_half_xz = config.CHUNK_SIZE * 0.5
-    chunk_half_y = config.CHUNK_HEIGHT * 0.5
-    chunk_radius = math.sqrt(chunk_half_xz**2 + chunk_half_y**2 + chunk_half_xz**2)
     focal_px = focal_length_px()
 
     cam_view = Vec3(state.cam_pos[0], state.cam_pos[1] + config.PLAYER_HEIGHT, state.cam_pos[2])
@@ -111,25 +167,12 @@ def gather_draw_list(pcx: int, pcy: int, pcz: int, sort_items: bool = True):
         for cy in range(cy_min, cy_max + 1):
             for cz in range(pcz - vr, pcz + vr + 1):
                 key = (cx, cy, cz)
-                chunk_center_x = cx * config.CHUNK_SIZE + chunk_half_xz
-                chunk_center_y = cy * config.CHUNK_HEIGHT + chunk_half_y
-                chunk_center_z = cz * config.CHUNK_SIZE + chunk_half_xz
-                chunk_cam = view_m4.transform_point(
-                    Vec3(chunk_center_x, chunk_center_y, chunk_center_z)
-                )
-                cx1 = chunk_cam.x
-                cy1 = chunk_cam.y
-                cz2 = chunk_cam.z
-
-                # Chunk-level frustum culling: conservative sphere test.
-                if cz2 + chunk_radius <= 0.1:
-                    continue
-                if cz2 - chunk_radius >= max_dist:
-                    continue
-                z_for_fov = max(0.1, cz2)
-                x_limit = (half_w * z_for_fov / focal_px) + chunk_radius
-                y_limit = (half_h * z_for_fov / focal_px) + chunk_radius
-                if abs(cx1) > x_limit or abs(cy1) > y_limit:
+                x0 = cx * config.CHUNK_SIZE
+                y0 = cy * config.CHUNK_HEIGHT
+                z0 = cz * config.CHUNK_SIZE
+                if not _chunk_in_view(
+                    view_m4, float(x0), float(y0), float(z0), half_w, half_h, focal_px, max_dist
+                ):
                     continue
 
                 if key in state.chunks:
@@ -141,9 +184,6 @@ def gather_draw_list(pcx: int, pcy: int, pcz: int, sort_items: bool = True):
                     seed = ((cx * 73856093) ^ (cy * 19349663) ^ (cz * 83492791)) & 0xFFFFFFFF
                     blocks = _sample_chunk_blocks(blocks, stride, seed)
 
-                    x0 = cx * config.CHUNK_SIZE
-                    y0 = cy * config.CHUNK_HEIGHT
-                    z0 = cz * config.CHUNK_SIZE
                     for rec in blocks:
                         idx = int(rec["idx"])
                         bid = int(rec["bid"])
@@ -256,9 +296,6 @@ def gather_frame_payload(pcx: int, pcy: int, pcz: int, sort_items: bool = False)
     block_chunks: list[np.ndarray] = []
     half_w = state.render_w / 2
     half_h = state.render_h / 2
-    chunk_half_xz = config.CHUNK_SIZE * 0.5
-    chunk_half_y = config.CHUNK_HEIGHT * 0.5
-    chunk_radius = math.sqrt(chunk_half_xz**2 + chunk_half_y**2 + chunk_half_xz**2)
     focal_px = focal_length_px()
 
     cam_view = Vec3(state.cam_pos[0], state.cam_pos[1] + config.PLAYER_HEIGHT, state.cam_pos[2])
@@ -273,24 +310,12 @@ def gather_frame_payload(pcx: int, pcy: int, pcz: int, sort_items: bool = False)
         for cy in range(cy_min, cy_max + 1):
             for cz in range(pcz - vr, pcz + vr + 1):
                 key = (cx, cy, cz)
-                chunk_center_x = cx * config.CHUNK_SIZE + chunk_half_xz
-                chunk_center_y = cy * config.CHUNK_HEIGHT + chunk_half_y
-                chunk_center_z = cz * config.CHUNK_SIZE + chunk_half_xz
-                chunk_cam = view_m4.transform_point(
-                    Vec3(chunk_center_x, chunk_center_y, chunk_center_z)
-                )
-                cx1 = chunk_cam.x
-                cy1 = chunk_cam.y
-                cz2 = chunk_cam.z
-
-                if cz2 + chunk_radius <= 0.1:
-                    continue
-                if cz2 - chunk_radius >= max_dist:
-                    continue
-                z_for_fov = max(0.1, cz2)
-                x_limit = (half_w * z_for_fov / focal_px) + chunk_radius
-                y_limit = (half_h * z_for_fov / focal_px) + chunk_radius
-                if abs(cx1) > x_limit or abs(cy1) > y_limit:
+                x0 = cx * config.CHUNK_SIZE
+                y0 = cy * config.CHUNK_HEIGHT
+                z0 = cz * config.CHUNK_SIZE
+                if not _chunk_in_view(
+                    view_m4, float(x0), float(y0), float(z0), half_w, half_h, focal_px, max_dist
+                ):
                     continue
 
                 if key in state.chunks:
