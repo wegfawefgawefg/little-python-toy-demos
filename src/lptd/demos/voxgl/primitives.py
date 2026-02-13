@@ -415,7 +415,7 @@ class GLPrimitives:
 
         vert_src = """
         #version 120
-        attribute vec2 aOriginXZ;
+        attribute vec3 aOrigin;
         attribute float aIdx;
         attribute float aBid;
         uniform vec3 uCamPos;
@@ -433,7 +433,7 @@ class GLPrimitives:
             float lx = mod(idx, 16.0);
             float lz = mod(floor(idx / 16.0), 16.0);
             float ly = floor(idx / 256.0);
-            vec3 world = vec3(aOriginXZ.x + lx + 0.5, ly + 0.5, aOriginXZ.y + lz + 0.5);
+            vec3 world = vec3(aOrigin.x + lx + 0.5, aOrigin.y + ly + 0.5, aOrigin.z + lz + 0.5);
             vec3 cam = uViewRot * (world - uCamPos);
             if (cam.z <= 0.1 || cam.z > uMaxDist) {
                 gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
@@ -450,7 +450,8 @@ class GLPrimitives:
             gl_Position = vec4(ndcX, ndcY, zn * 2.0 - 1.0, 1.0);
             gl_PointSize = clamp(uPointMul * proj, 1.0, uPointMax);
             int bid = int(aBid + 0.5);
-            vColor = uPalette[bid];
+            float shade = max(0.0, 1.0 - zn * zn);
+            vColor = uPalette[bid] * shade;
         }
         """
         frag_src = """
@@ -495,13 +496,13 @@ class GLPrimitives:
         glBindBuffer(GL_ARRAY_BUFFER, self._block_vbo)
         glBufferData(GL_ARRAY_BUFFER, data.nbytes, data, GL_STREAM_DRAW)
 
-        loc_origin = glGetAttribLocation(self._block_prog, "aOriginXZ")
+        loc_origin = glGetAttribLocation(self._block_prog, "aOrigin")
         loc_idx = glGetAttribLocation(self._block_prog, "aIdx")
         loc_bid = glGetAttribLocation(self._block_prog, "aBid")
         if loc_origin >= 0:
             glEnableVertexAttribArray(loc_origin)
             glVertexAttribPointer(
-                loc_origin, 2, GL_FLOAT, False, stride, ctypes.c_void_p(off_ox)
+                loc_origin, 3, GL_FLOAT, False, stride, ctypes.c_void_p(off_ox)
             )
         if loc_idx >= 0:
             glEnableVertexAttribArray(loc_idx)
@@ -527,8 +528,8 @@ class GLPrimitives:
         glUniform1f(glGetUniformLocation(self._block_prog, "uHalfH"), half_h)
         glUniform1f(glGetUniformLocation(self._block_prog, "uFocal"), focal)
         glUniform1f(glGetUniformLocation(self._block_prog, "uMaxDist"), float(max_dist))
-        glUniform1f(glGetUniformLocation(self._block_prog, "uPointMul"), 1.3)
-        glUniform1f(glGetUniformLocation(self._block_prog, "uPointMax"), 64.0)
+        glUniform1f(glGetUniformLocation(self._block_prog, "uPointMul"), 1.0)
+        glUniform1f(glGetUniformLocation(self._block_prog, "uPointMax"), 32.0)
         glUniform3fv(
             glGetUniformLocation(self._block_prog, "uPalette"), 256, self._block_palette
         )

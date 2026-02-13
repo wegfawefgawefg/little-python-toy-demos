@@ -22,8 +22,6 @@ _PACKED_BLOCK_DTYPE = np.dtype([("idx", np.uint16), ("bid", np.uint8)])
 def _is_solid_world(wx: int, wy: int, wz: int) -> bool:
     if wy < 0:
         return True
-    if wy >= config.CHUNK_HEIGHT:
-        return False
     return (wx, wy, wz) in state.solid_blocks
 
 
@@ -34,16 +32,23 @@ def _is_surface_voxel(wx: int, wy: int, wz: int) -> bool:
     return False
 
 
-def invalidate_chunk_draw_cache(key: tuple[int, int], include_neighbors: bool = False) -> None:
+def invalidate_chunk_draw_cache(key: tuple[int, int, int], include_neighbors: bool = False) -> None:
     state.chunk_draw_blocks.pop(key, None)
     if not include_neighbors:
         return
-    cx, cz = key
-    for nk in ((cx - 1, cz), (cx + 1, cz), (cx, cz - 1), (cx, cz + 1)):
+    cx, cy, cz = key
+    for nk in (
+        (cx - 1, cy, cz),
+        (cx + 1, cy, cz),
+        (cx, cy - 1, cz),
+        (cx, cy + 1, cz),
+        (cx, cy, cz - 1),
+        (cx, cy, cz + 1),
+    ):
         state.chunk_draw_blocks.pop(nk, None)
 
 
-def rebuild_chunk_sprite_bases(key: tuple[int, int]) -> None:
+def rebuild_chunk_sprite_bases(key: tuple[int, int, int]) -> None:
     entries: list[tuple] = []
     for entity in state.chunk_entities.get(key, []):
         et = entity["type"]
@@ -58,19 +63,20 @@ def rebuild_chunk_sprite_bases(key: tuple[int, int]) -> None:
     state.chunk_sprite_bases[key] = entries
 
 
-def rebuild_chunk_draw_blocks(key: tuple[int, int]) -> None:
+def rebuild_chunk_draw_blocks(key: tuple[int, int, int]) -> None:
     chunk = state.chunks[key]
     non_air = np.argwhere(chunk != config.BLOCK_AIR)
     packed: list[tuple[int, int]] = []
-    cx, cz = key
+    cx, cy, cz = key
     x0 = cx * config.CHUNK_SIZE
+    y0 = cy * config.CHUNK_HEIGHT
     z0 = cz * config.CHUNK_SIZE
     for lx, ly, lz in non_air:
         i_lx = int(lx)
         i_ly = int(ly)
         i_lz = int(lz)
         wx = x0 + i_lx
-        wy = i_ly
+        wy = y0 + i_ly
         wz = z0 + i_lz
         if _is_surface_voxel(wx, wy, wz):
             idx = i_lx | (i_lz << 4) | (i_ly << 8)
@@ -103,13 +109,14 @@ def get_ground_height(chunk: np.ndarray, lx: int, lz: int) -> int:
     return 0
 
 
-def generate_bunny(cx: int, cz: int, chunk: np.ndarray) -> dict:
+def generate_bunny(cx: int, cy: int, cz: int, chunk: np.ndarray) -> dict:
     lx = random.randint(0, config.CHUNK_SIZE - 1)
     lz = random.randint(0, config.CHUNK_SIZE - 1)
     ground_h = get_ground_height(chunk, lx, lz)
     wx = cx * config.CHUNK_SIZE + lx
+    wy = cy * config.CHUNK_HEIGHT + ground_h + 1
     wz = cz * config.CHUNK_SIZE + lz
-    pos = [wx + 0.5, ground_h + 1, wz + 0.5]
+    pos = [wx + 0.5, wy, wz + 0.5]
     hop_cycle = 0.5
     hop_timer = random.uniform(0, hop_cycle)
     vel = (random.uniform(-0.25, 0.25), 0.0, random.uniform(-0.25, 0.25))
@@ -146,7 +153,7 @@ def add_color_offset(base: tuple[int, int, int], offset: tuple[int, int, int]):
     return tuple(max(0, min(255, base[i] + offset[i])) for i in range(3))
 
 
-def generate_chunk(cx: int, cz: int) -> None:
+def generate_chunk(cx: int, cy: int, cz: int) -> None:
     chunk_array = np.zeros(
         (config.CHUNK_SIZE, config.CHUNK_HEIGHT, config.CHUNK_SIZE), dtype=np.uint8
     )
@@ -154,6 +161,7 @@ def generate_chunk(cx: int, cz: int) -> None:
     tree_requests: list[tuple[int, int, int]] = []
 
     x0 = cx * config.CHUNK_SIZE
+    y0 = cy * config.CHUNK_HEIGHT
     z0 = cz * config.CHUNK_SIZE
 
     for lx in range(config.CHUNK_SIZE):
@@ -172,33 +180,43 @@ def generate_chunk(cx: int, cz: int) -> None:
             )
             h = int(config.HEIGHT_BASE + n * config.HEIGHT_AMP)
 
-            if config.CHUNK_HEIGHT > 0:
-                chunk_array[lx, 0, lz] = config.BLOCK_BEDROCK
+            local_top = y0 + config.CHUNK_HEIGHT - 1
+
+            if y0 <= 0 <= local_top:
+                ly = 0 - y0
+                chunk_array[lx, ly, lz] = config.BLOCK_BEDROCK
                 state.solid_blocks.add((wx, 0, wz))
 
-            for y in range(1, h + 1):
-                if y < config.CHUNK_HEIGHT:
-                    chunk_array[lx, y, lz] = config.BLOCK_DIRT
-                    state.solid_blocks.add((wx, y, wz))
+            y_start = max(1, y0)
+            y_end = min(h, local_top)
+            if y_start <= y_end:
+                for wy in range(y_start, y_end + 1):
+                    ly = wy - y0
+                    chunk_array[lx, ly, lz] = config.BLOCK_DIRT
+                    state.solid_blocks.add((wx, wy, wz))
 
             if h < config.WATER_LEVEL:
-                for y in range(h + 1, config.WATER_LEVEL + 1):
-                    if y < config.CHUNK_HEIGHT:
-                        chunk_array[lx, y, lz] = config.BLOCK_WATER
-                        state.solid_blocks.add((wx, y, wz))
+                y_start = max(h + 1, y0)
+                y_end = min(config.WATER_LEVEL, local_top)
+                if y_start <= y_end:
+                    for wy in range(y_start, y_end + 1):
+                        ly = wy - y0
+                        chunk_array[lx, ly, lz] = config.BLOCK_WATER
+                        state.solid_blocks.add((wx, wy, wz))
 
-            if h >= config.WATER_LEVEL and random.random() < 0.25:
-                entity_list.append(generate_grass(wx, wz, h))
-            if h >= config.WATER_LEVEL and random.random() < 0.05:
-                entity_list.append(generate_flower_patch(wx, wz, h))
-            if h >= config.WATER_LEVEL and random.random() < 0.001:
-                tree_requests.append((wx, wz, h))
+            if cy == 0:
+                if h >= config.WATER_LEVEL and random.random() < 0.25:
+                    entity_list.append(generate_grass(wx, wz, h))
+                if h >= config.WATER_LEVEL and random.random() < 0.05:
+                    entity_list.append(generate_flower_patch(wx, wz, h))
+                if h >= config.WATER_LEVEL and random.random() < 0.001:
+                    tree_requests.append((wx, wz, h))
 
-    key = (cx, cz)
+    key = (cx, cy, cz)
     state.chunks[key] = chunk_array
 
-    if random.random() < config.BUNNY_SPAWN_CHANCE:
-        entity_list.append(generate_bunny(cx, cz, chunk_array))
+    if cy == 0 and random.random() < config.BUNNY_SPAWN_CHANCE:
+        entity_list.append(generate_bunny(cx, cy, cz, chunk_array))
 
     state.chunk_entities[key] = entity_list
     rebuild_chunk_sprite_bases(key)
@@ -207,8 +225,15 @@ def generate_chunk(cx: int, cz: int) -> None:
         generate_tree_at(wx, wz, h)
 
     rebuild_chunk_draw_blocks(key)
-    cx, cz = key
-    for nk in ((cx - 1, cz), (cx + 1, cz), (cx, cz - 1), (cx, cz + 1)):
+    cx, cy, cz = key
+    for nk in (
+        (cx - 1, cy, cz),
+        (cx + 1, cy, cz),
+        (cx, cy - 1, cz),
+        (cx, cy + 1, cz),
+        (cx, cy, cz - 1),
+        (cx, cy, cz + 1),
+    ):
         invalidate_chunk_draw_cache(nk, include_neighbors=False)
 
 
@@ -218,18 +243,24 @@ def add_voxel(pos: tuple[int, int, int], color: tuple[int, int, int]) -> None:
         return
     x, y, z = pos
     cx = x // config.CHUNK_SIZE
+    cy = y // config.CHUNK_HEIGHT
     cz = z // config.CHUNK_SIZE
-    key = (cx, cz)
+    key = (cx, cy, cz)
     if key not in state.chunks:
-        generate_chunk(cx, cz)
+        generate_chunk(cx, cy, cz)
     chunk = state.chunks[key]
     lx = x - cx * config.CHUNK_SIZE
+    ly = y - cy * config.CHUNK_HEIGHT
     lz = z - cz * config.CHUNK_SIZE
-    if 0 <= y < config.CHUNK_HEIGHT and 0 <= lx < config.CHUNK_SIZE and 0 <= lz < config.CHUNK_SIZE:
-        prev = int(chunk[lx, y, lz])
+    if (
+        0 <= ly < config.CHUNK_HEIGHT
+        and 0 <= lx < config.CHUNK_SIZE
+        and 0 <= lz < config.CHUNK_SIZE
+    ):
+        prev = int(chunk[lx, ly, lz])
         if prev == bid:
             return
-        chunk[lx, y, lz] = bid
+        chunk[lx, ly, lz] = bid
         state.solid_blocks.add(pos)
         invalidate_chunk_draw_cache(key, include_neighbors=True)
 
@@ -305,18 +336,23 @@ def generate_tree_at(x: int, z: int, ground_h: int) -> None:
     generate_branches(trunk_top, initial_direction, branch_length, branch_depth)
 
 
-def ensure_chunks_around(pcx: int, pcz: int) -> None:
+def ensure_chunks_around(pcx: int, pcy: int, pcz: int) -> None:
     vr = max(1, int(state.view_radius))
+    cy_min = max(0, pcy - int(config.VIEW_RADIUS_Y_DOWN))
+    cy_max = pcy + int(config.VIEW_RADIUS_Y_UP)
     for cx in range(pcx - vr, pcx + vr + 1):
-        for cz in range(pcz - vr, pcz + vr + 1):
-            if (cx - pcx) ** 2 + (cz - pcz) ** 2 <= vr**2:
-                if (cx, cz) not in state.chunks:
-                    generate_chunk(cx, cz)
+        for cy in range(cy_min, cy_max + 1):
+            for cz in range(pcz - vr, pcz + vr + 1):
+                if (cx - pcx) ** 2 + (cz - pcz) ** 2 <= vr**2:
+                    if (cx, cy, cz) not in state.chunks:
+                        generate_chunk(cx, cy, cz)
 
 
-def ensure_chunks_in_sight(pcx: int, pcz: int) -> None:
+def ensure_chunks_in_sight(pcx: int, pcy: int, pcz: int) -> None:
     """Prefetch chunks in front of the camera so looking around generates terrain."""
     vr = max(1, int(state.view_radius))
+    cy_min = max(0, pcy - int(config.VIEW_RADIUS_Y_DOWN))
+    cy_max = pcy + int(config.VIEW_RADIUS_Y_UP)
     cam_x = state.cam_pos[0]
     cam_z = state.cam_pos[2]
     fx = math.sin(state.cam_yaw)
@@ -327,18 +363,21 @@ def ensure_chunks_in_sight(pcx: int, pcz: int) -> None:
 
     for cx in range(pcx - vr, pcx + vr + 1):
         for cz in range(pcz - vr, pcz + vr + 1):
-            key = (cx, cz)
-            if key in state.chunks:
-                continue
             center_x = cx * config.CHUNK_SIZE + config.CHUNK_SIZE * 0.5
             center_z = cz * config.CHUNK_SIZE + config.CHUNK_SIZE * 0.5
             dx = center_x - cam_x
             dz = center_z - cam_z
             dist2 = dx * dx + dz * dz
             if dist2 <= 1e-6:
-                generate_chunk(cx, cz)
+                for cy in range(cy_min, cy_max + 1):
+                    key = (cx, cy, cz)
+                    if key not in state.chunks:
+                        generate_chunk(cx, cy, cz)
                 continue
             inv_len = 1.0 / math.sqrt(dist2)
             ndot = (dx * fx + dz * fz) * inv_len
             if ndot >= cos_limit:
-                generate_chunk(cx, cz)
+                for cy in range(cy_min, cy_max + 1):
+                    key = (cx, cy, cz)
+                    if key not in state.chunks:
+                        generate_chunk(cx, cy, cz)

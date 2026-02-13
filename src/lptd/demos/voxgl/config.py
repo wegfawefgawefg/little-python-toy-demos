@@ -7,7 +7,8 @@ WIDTH, HEIGHT = RENDER_W * WINDOW_SCALE, RENDER_H * WINDOW_SCALE
 # Horizontal field-of-view in degrees.
 FOV = 75.0
 
-# 16^3 chunks allow compact 12-bit local voxel indices.
+# Packed local index: idx = lx | (lz << 4) | (ly << 8).
+# With CHUNK_SIZE=16 and CHUNK_HEIGHT=16 this fits in uint16.
 CHUNK_SIZE = 16
 CHUNK_HEIGHT = 16
 WATER_LEVEL = 4
@@ -47,6 +48,8 @@ JUMP_IMPULSE = 7.0
 SPEED = 16.0
 
 VIEW_RADIUS = 1
+VIEW_RADIUS_Y_UP = 1
+VIEW_RADIUS_Y_DOWN = 3
 FPS_LIMIT = 144
 
 # Demo tuning for billboard entities.

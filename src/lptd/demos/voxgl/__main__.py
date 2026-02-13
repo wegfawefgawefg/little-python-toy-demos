@@ -36,6 +36,7 @@ def main(argv: list[str] | None = None) -> None:
 
     init_lowres_target(state.render_w, state.render_h)
     setup_ortho(state.render_w, state.render_h)
+    hud_prims = GLPrimitives()
 
     clock = pygame.time.Clock()
     pygame.mouse.set_visible(False)
@@ -58,19 +59,20 @@ def main(argv: list[str] | None = None) -> None:
         update_player(dt)
 
         pcx = int(math.floor(state.cam_pos[0] / config.CHUNK_SIZE))
+        pcy = int(math.floor((state.cam_pos[1] + config.PLAYER_HEIGHT) / config.CHUNK_HEIGHT))
         pcz = int(math.floor(state.cam_pos[2] / config.CHUNK_SIZE))
-        ensure_chunks_around(pcx, pcz)
-        ensure_chunks_in_sight(pcx, pcz)
+        ensure_chunks_around(pcx, pcy, pcz)
+        ensure_chunks_in_sight(pcx, pcy, pcz)
 
         update_entities(dt)
         fps = clock.get_fps()
 
         begin_lowres_pass(state.render_w, state.render_h)
-        draw_frame(pcx, pcz)
+        draw_frame(pcx, pcy, pcz)
         blit_lowres_to_screen(config.WIDTH, config.HEIGHT)
         # Draw HUD at native window resolution so text stays crisp.
         setup_ortho(config.WIDTH, config.HEIGHT)
-        draw_status(GLPrimitives(), fps, state.view_radius)
+        draw_status(hud_prims, fps, state.view_radius)
         pygame.display.flip()
 
         clock.tick(config.FPS_LIMIT)
