@@ -39,7 +39,7 @@ Tighten chunk and point rejection before draw-list append.
 
 Expected impact: low-to-medium.
 
-## 5) Distance-Based LOD Sampling
+## 5) Distance-Based LOD Sampling (Implemented)
 
 Draw fewer points in far chunks.
 

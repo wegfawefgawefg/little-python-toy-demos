@@ -25,6 +25,36 @@ BLOCK_INSTANCE_DTYPE = np.dtype(
 )
 
 
+def _lod_stride_for_chunk(cx: int, cy: int, cz: int, pcx: int, pcy: int, pcz: int) -> int:
+    if not config.BLOCK_LOD_ENABLE:
+        return 1
+    dx = cx - pcx
+    dy = cy - pcy
+    dz = cz - pcz
+    d2 = float(dx * dx + dy * dy + dz * dz)
+    near2 = float(config.BLOCK_LOD_NEAR_CHUNKS) ** 2
+    mid2 = float(config.BLOCK_LOD_MID_CHUNKS) ** 2
+    far2 = float(config.BLOCK_LOD_FAR_CHUNKS) ** 2
+    if d2 <= near2:
+        return 1
+    if d2 <= mid2:
+        return 2
+    if d2 <= far2:
+        return 4
+    return 8
+
+
+def _sample_chunk_blocks(blocks: np.ndarray, stride: int, seed: int) -> np.ndarray:
+    if stride <= 1 or len(blocks) <= 1:
+        return blocks
+    mask_bits = np.uint32(stride - 1)
+    idx = blocks["idx"].astype(np.uint32)
+    keep_mask = ((idx + np.uint32(seed)) & mask_bits) == 0
+    if np.any(keep_mask):
+        return blocks[keep_mask]
+    return blocks[:1]
+
+
 def _estimate_block_screen_size(
     cam: Vec3,
     sx: float,
@@ -107,6 +137,9 @@ def gather_draw_list(pcx: int, pcy: int, pcz: int, sort_items: bool = True):
                     if blocks is None:
                         rebuild_chunk_draw_blocks(key)
                         blocks = state.chunk_draw_blocks.get(key, [])
+                    stride = _lod_stride_for_chunk(cx, cy, cz, pcx, pcy, pcz)
+                    seed = ((cx * 73856093) ^ (cy * 19349663) ^ (cz * 83492791)) & 0xFFFFFFFF
+                    blocks = _sample_chunk_blocks(blocks, stride, seed)
 
                     x0 = cx * config.CHUNK_SIZE
                     y0 = cy * config.CHUNK_HEIGHT
@@ -266,12 +299,17 @@ def gather_frame_payload(pcx: int, pcy: int, pcz: int, sort_items: bool = False)
                         rebuild_chunk_draw_blocks(key)
                         blocks = state.chunk_draw_blocks.get(key)
                     if blocks is not None and len(blocks) > 0:
-                        chunk_instances = np.empty(len(blocks), dtype=BLOCK_INSTANCE_DTYPE)
+                        stride = _lod_stride_for_chunk(cx, cy, cz, pcx, pcy, pcz)
+                        seed = (
+                            (cx * 73856093) ^ (cy * 19349663) ^ (cz * 83492791)
+                        ) & 0xFFFFFFFF
+                        sampled = _sample_chunk_blocks(blocks, stride, seed)
+                        chunk_instances = np.empty(len(sampled), dtype=BLOCK_INSTANCE_DTYPE)
                         chunk_instances["ox"] = np.float32(cx * config.CHUNK_SIZE)
                         chunk_instances["oy"] = np.float32(cy * config.CHUNK_HEIGHT)
                         chunk_instances["oz"] = np.float32(cz * config.CHUNK_SIZE)
-                        chunk_instances["idx"] = blocks["idx"]
-                        chunk_instances["bid"] = blocks["bid"]
+                        chunk_instances["idx"] = sampled["idx"]
+                        chunk_instances["bid"] = sampled["bid"]
                         block_chunks.append(chunk_instances)
 
                 sprite_bases = state.chunk_sprite_bases.get(key)
