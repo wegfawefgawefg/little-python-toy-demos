@@ -30,6 +30,7 @@ def main(argv: list[str] | None = None) -> None:
     state.render_w = max(1, config.WIDTH // args.render_scale)
     state.render_h = max(1, config.HEIGHT // args.render_scale)
     state.view_radius = int(config.VIEW_RADIUS)
+    state.cam_pos[1] = float(config.START_CAM_Y)
 
     pygame.display.set_mode((config.WIDTH, config.HEIGHT), pygame.OPENGL | pygame.DOUBLEBUF)
     from .gl_draw import begin_lowres_pass, blit_lowres_to_screen, init_lowres_target, setup_ortho
