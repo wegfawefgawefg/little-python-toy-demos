@@ -41,3 +41,6 @@ Snake (auto/BFS, very fast):
 ```bash
 uv run python -m lptd.demos.snake_auto
 ```
+
+was toying around with this originally in Created: 2025-02-02 20:47:12 -0600
+then cleaned up. the voxel one was extracted and moved to pyvoxels, and theres a rust port i think. anywayts thanks. 
